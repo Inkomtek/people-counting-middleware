@@ -36,6 +36,8 @@ class DeviceList(models.Model):
     maximum_trigger = models.IntegerField(default=10)
     # False until the first sync stores existing ZK events as a baseline without counting them.
     baseline_done = models.BooleanField(default=False)
+    # WIB date (from event time) that current_count belongs to; a counted event on a newer date resets it.
+    count_date = models.DateField(null=True, blank=True)
 
     class Meta:
         verbose_name = "device"

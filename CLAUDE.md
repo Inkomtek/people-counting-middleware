@@ -22,7 +22,7 @@ Middleware that polls ZK people-counting sensors and creates a Work Order in Alg
 2. Fetch events: `GET /zt/open/api/v1/event/page?page=N&pageSize=10&deviceId=<id>&type=3` with `Authorization: Bearer <token>`. Results are newest first; keep paging until an already-stored `id` is found. On 401/expired token → refresh and retry once in the same cycle.
 3. Log every ZK request (token + events, success or failure) to `SensorLog`.
 4. Store new events in `EventLog` (dedupe by ZK `id`). Mapping: `id`→`id`, `eventTime`→`time`, `eventLogVO.trackId/height/eventType/recognitionTarget`→`track_id/height/event_type/recognition_target`.
-5. Count: each new event with `eventType == "in"` and `recognitionTarget == "Cross Line"` adds +1 to `DeviceList.current_count`. Ignore `out`, `passby`, `passby and in`, `turnback` (changed 2026-10-01: only `in` counts). Real values are lowercase and "Cross Line" has a space.
+5. Count: each new event with `eventType == "in"` and `recognitionTarget == "Cross Line"` adds +1 to `DeviceList.current_count`. Ignore `out`, `passby`, `passby and in`, `turnback` (changed 2026-10-01: only `in` counts). Real values are lowercase and "Cross Line" has a space. The count is per WIB day by event `eventTime`: the first counted event on a newer date resets `current_count` to 0 first (leftover from the previous day is discarded, no Work Order); `DeviceList.count_date` tracks the day.
 6. If `current_count < maximum_trigger` → stop; repeat next interval.
 7. If `current_count >= maximum_trigger` → POST Work Order to the notification endpoint, log to `NotificationLog` (no retry), then reset `current_count` to 0 even if the POST failed.
 

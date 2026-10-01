@@ -1,3 +1,4 @@
+from datetime import date
 from unittest import mock
 
 import requests
@@ -23,10 +24,10 @@ def token_ok():
     return http(json_data={"code": "00000000", "data": {"access_token": "tok"}})
 
 
-def event(event_id, event_type="in", target="Cross Line"):
+def event(event_id, event_type="in", target="Cross Line", event_time="2026-10-01 10:46:27"):
     return {
         "id": event_id,
-        "eventTime": "2026-10-01 10:46:27",
+        "eventTime": event_time,
         "eventLogVO": {"trackId": "1", "height": "157", "eventType": event_type, "recognitionTarget": target},
     }
 
@@ -130,6 +131,51 @@ class SyncDeviceTests(TestCase):
         self.assertEqual(post.call_count, 2)
         self.assertEqual(self.device.current_count, 1)
         self.assertEqual(SensorLog.objects.filter(status=SensorLog.STATUS_OFFLINE).count(), 1)
+
+    def test_same_day_events_keep_counting(self):
+        self.device.current_count = 1
+        self.device.count_date = date(2026, 10, 1)
+        self.device.save()
+        self.run_sync([page([event("1")])])
+        self.assertEqual(self.device.current_count, 2)
+        self.assertEqual(self.device.count_date, date(2026, 10, 1))
+
+    def test_new_day_resets_count(self):
+        self.device.current_count = 2
+        self.device.count_date = date(2026, 9, 30)
+        self.device.save()
+        self.run_sync([page([event("1")])])
+        self.assertEqual(self.device.current_count, 1)
+        self.assertEqual(self.device.count_date, date(2026, 10, 1))
+
+    def test_batch_across_midnight_discards_previous_day_without_work_order(self):
+        self.device.current_count = 2
+        self.device.count_date = date(2026, 9, 30)
+        self.device.save()
+        # Newest first, as ZK returns them: yesterday's 23:59 event reaches the threshold of 3.
+        self.run_sync([page([
+            event("today", event_time="2026-10-01 00:01:00"),
+            event("yesterday", event_time="2026-09-30 23:59:00"),
+        ])])
+        self.assertEqual(self.device.current_count, 1)
+        self.assertEqual(self.device.count_date, date(2026, 10, 1))
+        self.assertFalse(NotificationLog.objects.exists())
+        self.assertEqual(EventLog.objects.filter(counted=True).count(), 2)
+
+    def test_empty_count_date_is_set_without_reset(self):
+        self.device.current_count = 1
+        self.device.save()
+        self.run_sync([page([event("1")])])
+        self.assertEqual(self.device.current_count, 2)
+        self.assertEqual(self.device.count_date, date(2026, 10, 1))
+
+    def test_ignored_event_on_new_day_does_not_reset(self):
+        self.device.current_count = 2
+        self.device.count_date = date(2026, 9, 30)
+        self.device.save()
+        self.run_sync([page([event("1", "out")])])
+        self.assertEqual(self.device.current_count, 2)
+        self.assertEqual(self.device.count_date, date(2026, 9, 30))
 
     def test_sensor_log_never_stores_access_token(self):
         self.run_sync([page([])])

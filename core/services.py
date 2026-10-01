@@ -7,7 +7,6 @@ from datetime import datetime
 import requests
 from django.conf import settings
 from django.db import transaction
-from django.db.models import F
 from django.utils import timezone
 
 from .models import DeviceList, Endpoint, EventLog, NotificationLog, SensorLog
@@ -195,6 +194,32 @@ def dispatch_work_orders(device):
         )
 
 
+def apply_daily_count(device, events):
+    """Mark countable events and add them to device.current_count, resetting it on a new WIB day.
+
+    Day boundaries follow each event's own time, oldest first. A leftover count from a previous
+    day is discarded without a Work Order. Events older than count_date are not counted.
+    Returns the number of events counted.
+    """
+    counted = 0
+    for event in sorted(events, key=lambda e: e.time):
+        event.counted = False
+        if not is_countable(event):
+            continue
+        event_date = timezone.localtime(event.time).date()
+        if device.count_date is None:
+            device.count_date = event_date
+        elif event_date > device.count_date:
+            device.current_count = 0
+            device.count_date = event_date
+        elif event_date < device.count_date:
+            continue
+        event.counted = True
+        device.current_count += 1
+        counted += 1
+    return counted
+
+
 def sync_device(device, client):
     new_events = fetch_new_events(client, device)
 
@@ -205,18 +230,14 @@ def sync_device(device, client):
         logger.info("Device %s: stored %s baseline events (not counted)", device.id, len(new_events))
         return
 
-    for event in new_events:
-        event.counted = is_countable(event)
-    increment = sum(event.counted for event in new_events)
-
     with transaction.atomic():
+        device = DeviceList.objects.select_for_update().get(pk=device.pk)
+        increment = apply_daily_count(device, new_events)
         EventLog.objects.bulk_create(new_events, ignore_conflicts=True)
-        if increment:
-            DeviceList.objects.filter(pk=device.pk).update(current_count=F("current_count") + increment)
-        device.refresh_from_db()
+        device.save(update_fields=["current_count", "count_date"])
     logger.info(
-        "Device %s: %s new events, +%s counted, count %s/%s",
-        device.id, len(new_events), increment, device.current_count, device.maximum_trigger,
+        "Device %s: %s new events, +%s counted, count %s/%s on %s",
+        device.id, len(new_events), increment, device.current_count, device.maximum_trigger, device.count_date,
     )
 
     if device.current_count >= device.maximum_trigger:
