@@ -1,0 +1,18 @@
+<details data-filter-title="{{ title }}" open>
+  <summary>By {{ title }}</summary>
+  {% with choice=choices.0 %}
+  <form method="get" style="padding: 0 15px 10px;">
+    {% for key, values in choice.other_params.items %}{% for value in values %}
+    <input type="hidden" name="{{ key }}" value="{{ value }}">
+    {% endfor %}{% endfor %}
+    <label for="time_from" style="display:block;margin-top:6px;">From</label>
+    <input type="datetime-local" id="time_from" name="time_from" value="{{ choice.from }}" step="1" style="width:100%;">
+    <label for="time_to" style="display:block;margin-top:6px;">To</label>
+    <input type="datetime-local" id="time_to" name="time_to" value="{{ choice.to }}" step="1" style="width:100%;">
+    <div style="margin-top:8px;">
+      <input type="submit" value="Apply">
+      {% if choice.from or choice.to %}<a href="{{ choice.clear_url }}" style="margin-left:8px;">Clear</a>{% endif %}
+    </div>
+  </form>
+  {% endwith %}
+</details>

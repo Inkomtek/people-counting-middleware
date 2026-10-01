@@ -1,0 +1,51 @@
+{% extends "admin/base_site.html" %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Home</a> &rsaquo;
+  <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a> &rsaquo;
+  Daily recap
+</div>
+{% endblock %}
+
+{% block content %}
+<form method="get" style="margin-bottom: 1em;">
+  <label for="device">Device:</label>
+  <select name="device" id="device" onchange="this.form.submit()">
+    <option value="">All devices</option>
+    {% for id in devices %}
+    <option value="{{ id }}" {% if id == device_id %}selected{% endif %}>{{ id }}</option>
+    {% endfor %}
+  </select>
+</form>
+
+<div class="results">
+<table id="result_list">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Events received</th>
+      <th>Counted (in)</th>
+      <th>Work Orders sent</th>
+      <th>Success</th>
+      <th>Failed</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row.day|date:"D, d M Y" }}</td>
+      <td>{{ row.total }}</td>
+      <td>{{ row.counted }}</td>
+      <td>{{ row.sent }}</td>
+      <td>{{ row.success }}</td>
+      <td>{{ row.failed }}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="6">No data yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="help">Last {{ recap_days }} days with activity. Dates in Asia/Jakarta. "Events received" includes passby/turnback and baseline events; only "in" Cross Line events are counted.</p>
+{% endblock %}
