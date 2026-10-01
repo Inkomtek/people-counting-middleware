@@ -1,11 +1,15 @@
+import tablib
 from django.contrib import admin
 from django.db.models import Count, Q
 from django.db.models.functions import TruncDate
+from django.http import HttpResponse
 from django.template.response import TemplateResponse
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime
+from django.utils.dateparse import parse_date, parse_datetime
+from import_export.admin import ExportMixin
 
 from .models import DailyRecap, DeviceList, Endpoint, EventLog, NotificationLog, SchedulerConfig, SensorLog
+from .resources import EventLogResource, NotificationLogResource, SensorLogResource
 
 RECAP_DAYS = 30
 
@@ -89,7 +93,8 @@ class ReadOnlyAdmin(admin.ModelAdmin):
 
 
 @admin.register(EventLog)
-class EventLogAdmin(ReadOnlyAdmin):
+class EventLogAdmin(ExportMixin, ReadOnlyAdmin):
+    resource_classes = [EventLogResource]
     list_display = ("id", "time", "device", "event_type", "recognition_target", "track_id", "height", "counted")
     list_filter = (TimeRangeFilter, "event_type", "recognition_target", "counted", "device")
     date_hierarchy = "time"
@@ -98,17 +103,67 @@ class EventLogAdmin(ReadOnlyAdmin):
 
 
 @admin.register(SensorLog)
-class SensorLogAdmin(ReadOnlyAdmin):
+class SensorLogAdmin(ExportMixin, ReadOnlyAdmin):
+    resource_classes = [SensorLogResource]
     list_display = ("time", "status", "endpoint_url", "device")
     list_filter = ("status", "device")
     ordering = ("-time",)
 
 
 @admin.register(NotificationLog)
-class NotificationLogAdmin(ReadOnlyAdmin):
+class NotificationLogAdmin(ExportMixin, ReadOnlyAdmin):
+    resource_classes = [NotificationLogResource]
     list_display = ("time", "device", "endpoint_url", "response_status")
     list_filter = ("response_status", "device")
     ordering = ("-time",)
+
+
+RECAP_COLUMNS = [
+    ("day", "Date"),
+    ("total", "Events received"),
+    ("counted", "Counted (in)"),
+    ("sent", "Work Orders sent"),
+    ("success", "Success"),
+    ("failed", "Failed"),
+]
+RECAP_EXPORT_FORMATS = {
+    "csv": "text/csv",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+
+
+def build_recap_rows(device_id="", date_from=None, date_to=None, limit=None):
+    """Per-day totals of events and Work Orders, newest first. Dates are in Asia/Jakarta."""
+    events = EventLog.objects.annotate(day=TruncDate("time"))
+    notifications = NotificationLog.objects.annotate(day=TruncDate("time"))
+    if device_id:
+        events = events.filter(device_id=device_id)
+        notifications = notifications.filter(device_id=device_id)
+    if date_from:
+        events = events.filter(day__gte=date_from)
+        notifications = notifications.filter(day__gte=date_from)
+    if date_to:
+        events = events.filter(day__lte=date_to)
+        notifications = notifications.filter(day__lte=date_to)
+
+    event_rows = events.values("day").annotate(
+        total=Count("id"), counted=Count("id", filter=Q(counted=True)),
+    )
+    notification_rows = notifications.values("day").annotate(
+        sent=Count("id"), success=Count("id", filter=Q(response_status__startswith="2")),
+    )
+    days = {}
+    for row in event_rows:
+        days.setdefault(row["day"], {}).update(total=row["total"], counted=row["counted"])
+    for row in notification_rows:
+        days.setdefault(row["day"], {}).update(sent=row["sent"], success=row["success"])
+    rows = [
+        {"day": day, "total": 0, "counted": 0, "sent": 0, "success": 0, **values}
+        for day, values in sorted(days.items(), reverse=True)[:limit]
+    ]
+    for row in rows:
+        row["failed"] = row["sent"] - row["success"]
+    return rows
 
 
 @admin.register(DailyRecap)
@@ -118,44 +173,40 @@ class DailyRecapAdmin(ReadOnlyAdmin):
 
     def changelist_view(self, request, extra_context=None):
         device_id = request.GET.get("device") or ""
-        events = EventLog.objects.all()
-        notifications = NotificationLog.objects.all()
-        if device_id:
-            events = events.filter(device_id=device_id)
-            notifications = notifications.filter(device_id=device_id)
+        date_from = parse_date(request.GET.get("date_from") or "")
+        date_to = parse_date(request.GET.get("date_to") or "")
+        filtered = bool(date_from or date_to)
 
-        # Dates are truncated in the project timezone (Asia/Jakarta).
-        event_rows = (
-            events.annotate(day=TruncDate("time")).values("day")
-            .annotate(total=Count("id"), counted=Count("id", filter=Q(counted=True)))
-        )
-        notification_rows = (
-            notifications.annotate(day=TruncDate("time")).values("day")
-            .annotate(
-                sent=Count("id"),
-                success=Count("id", filter=Q(response_status__startswith="2")),
-            )
-        )
-        days = {}
-        for row in event_rows:
-            days.setdefault(row["day"], {}).update(total=row["total"], counted=row["counted"])
-        for row in notification_rows:
-            days.setdefault(row["day"], {}).update(sent=row["sent"], success=row["success"])
-        rows = [
-            {"day": day, "total": 0, "counted": 0, "sent": 0, "success": 0, **values}
-            for day, values in sorted(days.items(), reverse=True)[:RECAP_DAYS]
-        ]
-        for row in rows:
-            row["failed"] = row["sent"] - row["success"]
+        export_format = request.GET.get("export")
+        if export_format in RECAP_EXPORT_FORMATS:
+            rows = build_recap_rows(device_id, date_from, date_to)
+            return self.export_recap(rows, export_format)
 
+        # Without a date range the page shows only the latest days; exports always include every day.
+        rows = build_recap_rows(device_id, date_from, date_to, limit=None if filtered else RECAP_DAYS)
+        params = request.GET.copy()
+        params.pop("export", None)
         context = {
             **self.admin_site.each_context(request),
             "title": "Daily recap",
             "opts": self.model._meta,
             "rows": rows,
             "recap_days": RECAP_DAYS,
+            "filtered": filtered,
             "devices": DeviceList.objects.values_list("id", flat=True),
             "device_id": device_id,
+            "date_from": date_from.isoformat() if date_from else "",
+            "date_to": date_to.isoformat() if date_to else "",
+            "query": params.urlencode(),
             **(extra_context or {}),
         }
         return TemplateResponse(request, "admin/core/dailyrecap/change_list.html", context)
+
+    def export_recap(self, rows, export_format):
+        dataset = tablib.Dataset(headers=[label for _, label in RECAP_COLUMNS], title="Daily recap")
+        for row in rows:
+            dataset.append([row["day"].isoformat(), *(row[key] for key, _ in RECAP_COLUMNS[1:])])
+        response = HttpResponse(dataset.export(export_format), content_type=RECAP_EXPORT_FORMATS[export_format])
+        filename = f"daily_recap_{timezone.localdate().isoformat()}.{export_format}"
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response

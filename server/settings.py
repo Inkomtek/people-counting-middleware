@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "import_export",
     "core",
     "dummy_wo",
 ]
@@ -145,3 +146,8 @@ DUMMY_WO_TOKEN = os.getenv("DUMMY_WO_TOKEN", "")
 
 # Timeout (seconds) for outgoing HTTP requests to ZK and Work Order endpoints
 HTTP_TIMEOUT = 15
+
+# Admin exports (django-import-export): export only, CSV and XLSX.
+from import_export.formats.base_formats import CSV, XLSX  # noqa: E402
+
+EXPORT_FORMATS = [CSV, XLSX]

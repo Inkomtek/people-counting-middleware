@@ -1,3 +1,5 @@
+import csv
+import io
 from datetime import date
 from unittest import mock
 
@@ -200,6 +202,87 @@ class DailyRecapAdminTests(TestCase):
         self.assertEqual((rows["2026-10-01"]["total"], rows["2026-10-01"]["counted"]), (2, 1))
         today = max(rows)
         self.assertEqual((rows[today]["sent"], rows[today]["success"], rows[today]["failed"]), (2, 1, 1))
+
+
+class ExportTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        self.device = DeviceList.objects.get(id=DEVICE_ID)
+        self.client.force_login(User.objects.create_superuser("admin", "", "pw"))
+
+    def export_csv(self, url):
+        """Submit the django-import-export export form (CSV, all fields) and return the CSV rows."""
+        form = self.client.get(url).context["form"]
+        fields = [name for name in form.fields if name not in ("format", "resource", "export_items")]
+        data = {"format": "0", "resource": "0", **{name: "on" for name in fields}}
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, 200)
+        return list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))
+
+    def test_log_changelists_show_export_button(self):
+        for model in ("eventlog", "sensorlog", "notificationlog"):
+            response = self.client.get(f"/admin/core/{model}/")
+            self.assertContains(response, f"/admin/core/{model}/export/")
+
+    def test_event_log_export_respects_filters_and_uses_wib(self):
+        EventLog.objects.create(id="a", time="2026-10-01T10:00:00+07:00", device=self.device,
+                                event_type="in", recognition_target="Cross Line", counted=True)
+        EventLog.objects.create(id="b", time="2026-10-01T11:00:00+07:00", device=self.device, event_type="out")
+        rows = self.export_csv("/admin/core/eventlog/export/?event_type=in")
+        self.assertEqual(rows[0], ["id", "time", "device", "event_type", "recognition_target",
+                                   "track_id", "height", "counted"])
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1][:4], ["a", "2026-10-01 10:00:00", DEVICE_ID, "in"])
+
+    def test_notification_log_export_has_json_text(self):
+        NotificationLog.objects.create(device=self.device, endpoint_url="x", response_status="200 OK",
+                                       body={"REQ_DESC": "Toilet"}, head={}, response={"status": "success"})
+        rows = self.export_csv("/admin/core/notificationlog/export/")
+        record = dict(zip(rows[0], rows[1]))
+        self.assertEqual(record["body"], '{"REQ_DESC": "Toilet"}')
+        self.assertEqual(record["response"], '{"status": "success"}')
+        self.assertEqual(record["device"], DEVICE_ID)
+
+    def test_sensor_log_export_works(self):
+        SensorLog.objects.create(device=self.device, status="ONLINE", endpoint_url="x", response={"code": "0"})
+        rows = self.export_csv("/admin/core/sensorlog/export/")
+        self.assertEqual(rows[0], ["id", "time", "status", "endpoint_url", "device", "response"])
+        self.assertEqual(rows[1][2:], ["ONLINE", "x", DEVICE_ID, '{"code": "0"}'])
+
+    def create_recap_data(self):
+        for event_id, when in [("a", "2026-09-29T10:00:00+07:00"), ("b", "2026-09-30T10:00:00+07:00"),
+                               ("c", "2026-10-01T10:00:00+07:00"), ("d", "2026-10-01T23:30:00+07:00")]:
+            EventLog.objects.create(id=event_id, time=when, device=self.device, counted=True)
+
+    def test_recap_date_filter(self):
+        self.create_recap_data()
+        response = self.client.get("/admin/core/dailyrecap/?date_from=2026-09-30&date_to=2026-10-01")
+        days = [row["day"].isoformat() for row in response.context["rows"]]
+        self.assertEqual(days, ["2026-10-01", "2026-09-30"])
+        self.assertContains(response, "date_from=2026-09-30&amp;date_to=2026-10-01&amp;export=csv")
+
+    def test_recap_export_csv(self):
+        self.create_recap_data()
+        response = self.client.get("/admin/core/dailyrecap/?date_from=2026-09-30&export=csv")
+        self.assertIn("attachment;", response["Content-Disposition"])
+        rows = list(csv.reader(io.StringIO(response.content.decode())))
+        self.assertEqual(rows[0], ["Date", "Events received", "Counted (in)", "Work Orders sent", "Success", "Failed"])
+        self.assertEqual(rows[1:], [["2026-10-01", "2", "2", "0", "0", "0"], ["2026-09-30", "1", "1", "0", "0", "0"]])
+
+    def test_recap_export_xlsx_includes_every_day_without_filter(self):
+        from openpyxl import load_workbook
+
+        from core import admin as core_admin
+
+        self.create_recap_data()
+        with mock.patch.object(core_admin, "RECAP_DAYS", 1):
+            page_rows = self.client.get("/admin/core/dailyrecap/").context["rows"]
+            response = self.client.get("/admin/core/dailyrecap/?export=xlsx")
+        self.assertEqual(len(page_rows), 1)
+        sheet = load_workbook(io.BytesIO(response.content)).active
+        self.assertEqual([row[0] for row in sheet.iter_rows(min_row=2, values_only=True)],
+                         ["2026-10-01", "2026-09-30", "2026-09-29"])
 
 
 @override_settings(ZK_CLIENT_ID="cid", ZK_CLIENT_SECRET="secret")

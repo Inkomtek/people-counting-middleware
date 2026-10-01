@@ -11,12 +11,22 @@
 {% block content %}
 <form method="get" style="margin-bottom: 1em;">
   <label for="device">Device:</label>
-  <select name="device" id="device" onchange="this.form.submit()">
+  <select name="device" id="device">
     <option value="">All devices</option>
     {% for id in devices %}
     <option value="{{ id }}" {% if id == device_id %}selected{% endif %}>{{ id }}</option>
     {% endfor %}
   </select>
+  <label for="date_from" style="margin-left: 1em;">From:</label>
+  <input type="date" id="date_from" name="date_from" value="{{ date_from }}">
+  <label for="date_to">To:</label>
+  <input type="date" id="date_to" name="date_to" value="{{ date_to }}">
+  <input type="submit" value="Apply">
+  {% if device_id or filtered %}<a href="?" style="margin-left: 8px;">Clear</a>{% endif %}
+  <span style="margin-left: 1.5em;">
+    <a class="button" href="?{% if query %}{{ query }}&amp;{% endif %}export=csv">Export CSV</a>
+    <a class="button" href="?{% if query %}{{ query }}&amp;{% endif %}export=xlsx">Export XLSX</a>
+  </span>
 </form>
 
 <div class="results">
@@ -47,5 +57,5 @@
   </tbody>
 </table>
 </div>
-<p class="help">Last {{ recap_days }} days with activity. Dates in Asia/Jakarta. "Events received" includes passby/turnback and baseline events; only "in" Cross Line events are counted.</p>
+<p class="help">{% if filtered %}All days with activity in the selected range.{% else %}Last {{ recap_days }} days with activity (exports include every day).{% endif %} Dates in Asia/Jakarta. "Events received" includes passby/turnback and baseline events; only "in" Cross Line events are counted.</p>
 {% endblock %}
