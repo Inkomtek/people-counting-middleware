@@ -1,0 +1,22 @@
+# Development override: Django runserver with auto-reload and source mounted.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+services:
+  web:
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+    environment:
+      DJANGO_DEBUG: "True"
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+
+  scheduler:
+    environment:
+      DJANGO_DEBUG: "True"
+    volumes:
+      - .:/app
+
+  db:
+    ports:
+      - "5433:5432"

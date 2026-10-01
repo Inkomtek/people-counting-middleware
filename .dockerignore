@@ -1,0 +1,9 @@
+.git
+.venv
+.env
+*.pdf
+*.png
+db.sqlite3
+staticfiles
+**/__pycache__
+**/*.pyc

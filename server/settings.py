@@ -10,22 +10,30 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+load_dotenv(BASE_DIR / ".env")
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-&hmve*qmesjcb%)vo@m8h2b!zcn#&ldsos$u*oz@ynt4t=h20h"
+SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DJANGO_DEBUG", "False") == "True"
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [h for h in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",") if h]
+
+# Needed for Admin login behind Nginx, e.g. "http://192.168.1.10,https://middleware.example.com"
+CSRF_TRUSTED_ORIGINS = [o for o in os.getenv("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o]
 
 
 # Application definition
@@ -38,6 +46,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "core",
+    "dummy_wo",
 ]
 
 MIDDLEWARE = [
@@ -75,8 +84,13 @@ WSGI_APPLICATION = "server.wsgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.getenv("DB_NAME", "people_counting"),
+        "USER": os.getenv("DB_USER", "postgres"),
+        "PASSWORD": os.getenv("DB_PASSWORD", ""),
+        "HOST": os.getenv("DB_HOST", "127.0.0.1"),
+        "PORT": os.getenv("DB_PORT", "5432"),
+        "OPTIONS": {"connect_timeout": 5},
     }
 }
 
@@ -105,7 +119,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = "UTC"
+TIME_ZONE = "Asia/Jakarta"
 
 USE_I18N = True
 
@@ -116,3 +130,18 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+
+# ZK Open API credentials (used to fill {{client_id}} / {{client_secret}} in the token Endpoint body)
+ZK_CLIENT_ID = os.getenv("ZK_CLIENT_ID", "")
+ZK_CLIENT_SECRET = os.getenv("ZK_CLIENT_SECRET", "")
+
+# Real Algospection Work Order token (fills {{algospection_token}} in the real Endpoint body)
+ALGOSPECTION_TOKEN = os.getenv("ALGOSPECTION_TOKEN", "")
+
+# Static token accepted by the dummy Work Order API
+DUMMY_WO_TOKEN = os.getenv("DUMMY_WO_TOKEN", "")
+
+# Timeout (seconds) for outgoing HTTP requests to ZK and Work Order endpoints
+HTTP_TIMEOUT = 15
