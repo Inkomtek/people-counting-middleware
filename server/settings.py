@@ -46,8 +46,11 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "import_export",
+    "rest_framework",
+    "drf_spectacular",
     "core",
     "dummy_wo",
+    "washroom",
 ]
 
 MIDDLEWARE = [
@@ -151,3 +154,26 @@ HTTP_TIMEOUT = 15
 from import_export.formats.base_formats import CSV, XLSX  # noqa: E402
 
 EXPORT_FORMATS = [CSV, XLSX]
+
+# Washroom REST API (/api/v1/): external systems authenticate with an X-API-Key header (ApiClient in Admin).
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": ["washroom.authentication.ApiKeyAuthentication"],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 50,
+    "UNAUTHENTICATED_USER": None,
+    "EXCEPTION_HANDLER": "washroom.exceptions.api_exception_handler",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Washroom API",
+    "DESCRIPTION": "Endpoints for external systems to send washroom sensor data and read the dashboard snapshot.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    # The docs page itself is public; every API call still needs X-API-Key.
+    "SERVE_PERMISSIONS": ["rest_framework.permissions.AllowAny"],
+    "SERVE_AUTHENTICATION": [],
+}
