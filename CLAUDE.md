@@ -9,7 +9,8 @@ Django 6.0 project for a people-counting middleware. The sync engine, scheduler,
 - `server/` — project config (settings, root URLconf, WSGI/ASGI). PostgreSQL only; settings read everything from `.env` via python-dotenv (`DJANGO_SECRET_KEY` is required).
 - `core/` — main app: models, sync engine, Admin, management commands.
 - `dummy_wo/` — local stand-in for the Algospection Work Order API.
-- `washroom/` — REST API (DRF) for external systems to send washroom sensor data and read the dashboard snapshot. See "Washroom API" below.
+- `washroom/` — REST API (DRF) for the ZK side to send washroom sensor data and ratings, on `core.DeviceList`. See "Washroom API" below.
+- `dashboard/` — the public dashboard (team-built). See "Dashboard" below.
 - Python 3.12 is installed at `%LOCALAPPDATA%\Programs\Python\Python312\`. PostgreSQL 16 is installed locally.
 - Reference docs in repo root: `PRD - People Counting Middleware.pdf`, flowchart PNG, `Level3 Open API-*.pdf` (ZK API), `Dokumentasi_API_Integrasi_WO_IoT_Algospection*.pdf` (Work Order API). Extract text with `pdftotext -layout`.
 
@@ -43,14 +44,13 @@ Middleware that polls ZK people-counting sensors and creates a Work Order in Alg
 
 ## Washroom API (decisions confirmed with user, 2026-10-02)
 
-The ZK side only POSTs washroom sensor data and rating presses through this API; we define the payload format. The **only** dashboard is the team's `dashboard/` app (decision 2026-10-02: our own `/dashboard/` page was removed). Its sensor cards are not yet wired to this API's data (still "Segera Hadir").
+The ZK side POSTs washroom sensor data and rating presses through this API (`washroom/` app); we define the payload format. The API follows the dashboard's data model exactly (decision 2026-10-02): no device/location models of its own, everything hangs off `core.DeviceList` (`type`, `building`, `floor`, `gender`). The only dashboard is the team's `dashboard/` app; its sensor cards are not wired to this data yet (still "Segera Hadir").
 
-- `Washroom` = building + floor + gender (unique); one dashboard per washroom. `people_counters` (M2M to `core.DeviceList`) links ZK counters; `SensorDevice.washroom` links sensors (assigned in Admin; unassigned devices appear on no dashboard). `washroom/0004` seeds GRAHA ISS BINTARO / Lantai 2 / Pria with ZK device `2069691213314072577`.
-- Auth: `X-API-Key` header, one `ApiClient` per external system (Admin or `create_api_client`; raw key shown once, only SHA-256 hash stored). `/api/docs/` (Swagger) and `/api/schema/` are public.
-- `POST /api/v1/readings/` — JSON object or list (max 500, all or nothing): `device_id`, `type` (`soap` / `toilet_paper` / `tissue` / `trash` / `amonia`), optional `time` (default now; naive = WIB), `battery` (0-100), `level` (% or ppm for amonia), `location`. Unknown devices are auto-registered; a type different from the registered one is rejected. `GET` lists readings.
-- `POST /api/v1/customer-responses/` — `device_id`, `rating` (1-5), optional `time`, `location`, `comment`. Auto-registers the device as `SensorDevice` type `feedback` (a sensor's ID cannot send ratings). `GET` lists them.
-- `GET /api/v1/washrooms/` (filters) and `GET /api/v1/dashboard/?washroom=<id>&date=YYYY-MM-DD` (default first washroom, today; future date → 400). Both accept an API key or a staff Admin session; POST endpoints accept only API keys.
-- Dashboard data (`washroom/services.py:build_dashboard`): `people_in` = `in` + `Cross Line` events that day, `work_orders` = NotificationLog that day, `current_count`/`maximum_trigger` today only. Sensor cards per type in `READING_TYPES` order; `available=false` → "Segera Hadir"; several devices of one type → the worst severity is shown. Past dates use each device's last reading of that day and `online` is null.
+- Auth: `X-API-Key` header, one `ApiClient` per external system (Admin or `create_api_client`; raw key shown once, only SHA-256 hash stored). Admin sessions cannot call the API. `/api/docs/` (Swagger) and `/api/schema/` are public.
+- `POST /api/v1/readings/` — JSON object or list (max 500, all or nothing): `device_id`, `type` (`soap` / `toilet-paper` / `tissue` / `trash` / `ammonia`, i.e. `DeviceList.type`), optional `time` (default now; naive = WIB), `battery` (0-100), `level` (%, or ppm for ammonia). Stored in `SensorReading` (FK to `DeviceList`) with the raw `payload`.
+- `POST /api/v1/customer-responses/` — `device_id` (a `satisfaction` device), `rating` (1-5), optional `time`, `comment`. Stored in `CustomerResponse`.
+- An unknown `device_id` is registered in `DeviceList` with that type and an empty location (set building/floor/gender in Admin so the dashboard shows it); a device registered with another type (including `people`) is rejected. `sync_all` only syncs `people`, so these devices never call ZK.
+- `GET` on both endpoints lists history, filterable by `device_id`, `building`, `floor`, `gender`, `time_from`, `time_to` (readings also `type`); responses include the device's building/floor/gender.
 - Condition is computed by the server: `StatusRule` per type matches `min_level <= level < max_level` (seeded in `washroom/0002`, editable in Admin) → `condition` + `severity` (`normal`/`warning`/`critical`).
 - Errors are always `{"status": "error", "message": ..., "errors"?: [...]}` (`washroom/exceptions.py`).
 
@@ -66,7 +66,7 @@ Use the venv: `.venv\Scripts\python` (deps in `requirements.txt`). Config comes 
 - All tests: `python manage.py test`; single test: `python manage.py test core.tests.SyncDeviceTests.test_counts_only_in_cross_line`
 - Admin user: `python manage.py createsuperuser`
 - Washroom API key: `python manage.py create_api_client <name> [--regenerate]` (prints the key once; Docker: `docker compose exec web python manage.py create_api_client <name>`)
-- Washroom API end-to-end test: `python manage.py send_dummy_data [--scenario random|normal|warning|critical] [--washroom ID] [--ratings N] [--base-url URL]` registers `DUMMY-*` devices on the washroom and POSTs readings + ratings over HTTP with a regenerated `dummy-tester` key; `--cleanup` removes them. Docker: `docker compose exec web python manage.py send_dummy_data --base-url http://127.0.0.1:8000`
+- Washroom API end-to-end test: `python manage.py send_dummy_data [--scenario random|normal|warning|critical] [--building B --floor F --gender male|female] [--ratings N] [--base-url URL]` registers `DUMMY-*` devices (all reading types + satisfaction) on a toilet (default: the first located people counter's) and POSTs over HTTP with a regenerated `dummy-tester` key; `--cleanup` deletes those devices with their data. Docker: `docker compose exec web python manage.py send_dummy_data --base-url http://127.0.0.1:8000`
 
 ## Docker
 

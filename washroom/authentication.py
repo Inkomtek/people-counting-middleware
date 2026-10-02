@@ -1,6 +1,6 @@
 from django.utils import timezone
 from drf_spectacular.extensions import OpenApiAuthenticationExtension
-from rest_framework import authentication, exceptions, permissions
+from rest_framework import authentication, exceptions
 
 from .models import ApiClient, hash_key
 
@@ -32,10 +32,3 @@ class ApiKeyAuthenticationScheme(OpenApiAuthenticationExtension):
     def get_security_definition(self, auto_schema):
         return {"type": "apiKey", "in": "header", "name": HEADER}
 
-
-class IsApiClientOrStaff(permissions.BasePermission):
-    """An API key client, or a staff user logged in to Admin (used by our dashboard page)."""
-
-    def has_permission(self, request, view):
-        user = request.user
-        return isinstance(user, ApiClient) or bool(user and getattr(user, "is_staff", False))

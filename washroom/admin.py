@@ -1,6 +1,6 @@
 from django.contrib import admin, messages
 
-from .models import ApiClient, CustomerResponse, SensorDevice, SensorReading, StatusRule, Washroom, WashroomConfig
+from .models import ApiClient, CustomerResponse, SensorReading, StatusRule
 
 
 @admin.register(ApiClient)
@@ -31,44 +31,11 @@ class ApiClientAdmin(admin.ModelAdmin):
         )
 
 
-@admin.register(WashroomConfig)
-class WashroomConfigAdmin(admin.ModelAdmin):
-    list_display = ("__str__", "offline_after_minutes")
-
-    def has_add_permission(self, request):
-        return not WashroomConfig.objects.exists()
-
-    def has_delete_permission(self, request, obj=None):
-        return False
-
-
 @admin.register(StatusRule)
 class StatusRuleAdmin(admin.ModelAdmin):
     list_display = ("sensor_type", "condition", "severity", "min_level", "max_level")
     list_editable = ("condition", "severity", "min_level", "max_level")
     list_filter = ("sensor_type", "severity")
-
-
-@admin.register(Washroom)
-class WashroomAdmin(admin.ModelAdmin):
-    list_display = ("building", "floor", "gender", "device_count")
-    list_filter = ("building", "floor", "gender")
-    filter_horizontal = ("people_counters",)
-
-    @admin.display(description="sensor devices")
-    def device_count(self, obj):
-        return obj.devices.count()
-
-
-@admin.register(SensorDevice)
-class SensorDeviceAdmin(admin.ModelAdmin):
-    list_display = ("id", "type", "washroom", "name", "location", "last_seen", "last_battery", "last_level", "last_condition")
-    list_editable = ("washroom",)
-    list_filter = ("type", "washroom")
-    search_fields = ("id", "name", "location")
-    readonly_fields = (
-        "last_seen", "last_battery", "last_level", "last_condition", "last_severity", "created_at",
-    )
 
 
 class ReadOnlyAdmin(admin.ModelAdmin):
@@ -82,14 +49,14 @@ class ReadOnlyAdmin(admin.ModelAdmin):
 @admin.register(SensorReading)
 class SensorReadingAdmin(ReadOnlyAdmin):
     list_display = ("time", "device", "battery", "level", "condition", "client")
-    list_filter = ("device__type", "condition", "device")
+    list_filter = ("device__type", "condition", "device__building", "device__floor", "device__gender", "device")
     date_hierarchy = "time"
     ordering = ("-time",)
 
 
 @admin.register(CustomerResponse)
 class CustomerResponseAdmin(ReadOnlyAdmin):
-    list_display = ("time", "device_id", "location", "rating", "comment", "client")
-    list_filter = ("rating", "device_id")
+    list_display = ("time", "device", "rating", "comment", "client")
+    list_filter = ("rating", "device__building", "device__floor", "device__gender", "device")
     date_hierarchy = "time"
     ordering = ("-time",)

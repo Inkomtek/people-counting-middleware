@@ -3,29 +3,33 @@ import random
 import requests
 from django.core.management.base import BaseCommand, CommandError
 
-from washroom.models import READING_TYPES, ApiClient, CustomerResponse, SensorDevice, SensorType, Washroom
+from core.models import DeviceList
+from washroom.models import PPM_TYPES, READING_TYPES, SATISFACTION_TYPE, ApiClient
 
 DUMMY_PREFIX = "DUMMY-"
 DUMMY_CLIENT = "dummy-tester"
 
-# Level per scenario: (dispensers %, trash %, amonia ppm).
+# Level range per scenario: (dispensers %, trash %, ammonia ppm).
 SCENARIOS = {
-    "normal": {"dispenser": (60, 100), "trash": (0, 50), "amonia": (0, 8)},
-    "warning": {"dispenser": (5, 30), "trash": (70, 89), "amonia": (10, 24)},
-    "critical": {"dispenser": (0, 0), "trash": (90, 100), "amonia": (25, 60)},
+    "normal": {"dispenser": (60, 100), "trash": (0, 50), "ammonia": (0, 8)},
+    "warning": {"dispenser": (5, 30), "trash": (70, 89), "ammonia": (10, 24)},
+    "critical": {"dispenser": (0, 0), "trash": (90, 100), "ammonia": (25, 60)},
 }
 RATINGS = {"normal": (4, 5), "warning": (3, 4), "critical": (1, 2)}
 
 
 class Command(BaseCommand):
     help = (
-        "Test the washroom API end to end: register dummy devices on a washroom, then POST readings and "
-        "ratings over HTTP like the ZK side would. Use --cleanup to remove all dummy data."
+        "Test the washroom API end to end: register DUMMY-* devices on a toilet (building / floor / gender, "
+        "like the dashboard), then POST readings and ratings over HTTP like the ZK side would. "
+        "Use --cleanup to remove all dummy data."
     )
 
     def add_arguments(self, parser):
         parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="Server running the API")
-        parser.add_argument("--washroom", type=int, help="Washroom id (default: the first one)")
+        parser.add_argument("--building", help="Default: the toilet of the first located people counter")
+        parser.add_argument("--floor")
+        parser.add_argument("--gender", choices=[value for value, _ in DeviceList.GENDER_CHOICES])
         parser.add_argument(
             "--scenario", choices=["random", *SCENARIOS], default="random",
             help="normal = all green, warning = orange, critical = red, random = mixed (default)",
@@ -37,65 +41,70 @@ class Command(BaseCommand):
         if options["cleanup"]:
             return self.cleanup()
 
-        washroom = (
-            Washroom.objects.filter(pk=options["washroom"]).first() if options["washroom"]
-            else Washroom.objects.first()
-        )
-        if washroom is None:
-            raise CommandError("Washroom not found. Create one in Admin -> Washrooms.")
-
+        toilet = self.toilet(options)
         client, _ = ApiClient.objects.get_or_create(name=DUMMY_CLIENT, defaults={"key_hash": "", "key_prefix": ""})
         api_key = client.set_new_key()
         client.is_active = True
         client.save()
 
-        # Devices must be assigned to a washroom to appear on its dashboard; real ones are assigned in Admin.
-        types = [*READING_TYPES, SensorType.FEEDBACK]
-        for sensor_type in types:
-            SensorDevice.objects.update_or_create(
-                id=self.device_id(sensor_type, washroom),
-                defaults={"type": sensor_type, "washroom": washroom, "name": f"Dummy {sensor_type.label}"},
+        # Pre-register the devices with a location so the dashboard can place them; real devices get
+        # their location in Admin.
+        for device_type in [*READING_TYPES, SATISFACTION_TYPE]:
+            DeviceList.objects.update_or_create(
+                id=self.device_id(device_type, toilet),
+                defaults={"type": device_type, "name": f"Dummy {device_type}", **toilet},
             )
 
-        self.stdout.write(f"Washroom : {washroom}")
-        self.stdout.write(f"API      : {options['base_url']}/api/v1/  (key '{DUMMY_CLIENT}' regenerated)\n")
+        self.stdout.write(f"Toilet : {toilet['building']} / lantai {toilet['floor']} / {toilet['gender']}")
+        self.stdout.write(f"API    : {options['base_url']}/api/v1/  (key '{DUMMY_CLIENT}' regenerated)\n")
 
-        readings = [self.reading(t, washroom, options["scenario"]) for t in READING_TYPES]
-        ok = self.post(options["base_url"], api_key, "readings/", readings)
-        if ok:
+        readings = [self.reading(t, toilet, options["scenario"]) for t in READING_TYPES]
+        if ok := self.post(options["base_url"], api_key, "readings/", readings):
             for item in ok["data"]:
-                unit = "ppm" if item["type"] == SensorType.AMONIA else "%"
+                unit = "ppm" if item["type"] in PPM_TYPES else "%"
                 self.stdout.write(
                     f"  {item['type']:<13} level {item['level']:>5}{unit:<4} battery {item['battery']:>3}%  "
                     f"-> {item['condition'] or '-'} ({item['severity'] or '-'})"
                 )
 
         ratings = [
-            {"device_id": self.device_id(SensorType.FEEDBACK, washroom), "rating": self.rating(options["scenario"])}
+            {"device_id": self.device_id(SATISFACTION_TYPE, toilet), "rating": self.rating(options["scenario"])}
             for _ in range(options["ratings"])
         ]
         if ratings and (ok := self.post(options["base_url"], api_key, "customer-responses/", ratings)):
             values = [item["rating"] for item in ok["data"]]
-            self.stdout.write(f"  feedback      {len(values)} ratings, average {sum(values) / len(values):.1f}")
+            self.stdout.write(f"  satisfaction  {len(values)} ratings, average {sum(values) / len(values):.1f}")
 
         self.stdout.write(self.style.SUCCESS(
-            f"\nDone. Check the stored data in Admin -> Sensor readings, or (logged in to Admin) at "
-            f"{options['base_url']}/api/v1/dashboard/?washroom={washroom.pk}"
+            "\nDone. Check the stored data in Admin -> Sensor readings / Customer responses."
         ))
         self.stdout.write("Remove the dummy data later with: python manage.py send_dummy_data --cleanup")
 
-    @staticmethod
-    def device_id(sensor_type, washroom):
-        return f"{DUMMY_PREFIX}{sensor_type.value.upper()}-{washroom.pk}"
+    def toilet(self, options):
+        anchor = (
+            DeviceList.objects.filter(type=DeviceList.TYPE_PEOPLE).exclude(building="").order_by("id").first()
+        )
+        toilet = {
+            "building": options["building"] or (anchor.building if anchor else ""),
+            "floor": options["floor"] or (anchor.floor if anchor else ""),
+            "gender": options["gender"] or (anchor.gender if anchor else ""),
+        }
+        if not all(toilet.values()):
+            raise CommandError("No toilet location found. Pass --building, --floor and --gender.")
+        return toilet
 
-    def reading(self, sensor_type, washroom, scenario):
+    @staticmethod
+    def device_id(device_type, toilet):
+        return f"{DUMMY_PREFIX}{device_type.upper()}-{toilet['floor']}-{toilet['gender']}".replace(" ", "")
+
+    def reading(self, device_type, toilet, scenario):
         level_scenario = random.choice(list(SCENARIOS)) if scenario == "random" else scenario
-        key = "trash" if sensor_type == SensorType.TRASH else "amonia" if sensor_type == SensorType.AMONIA else "dispenser"
+        key = device_type if device_type in ("trash", "ammonia") else "dispenser"
         low, high = SCENARIOS[level_scenario][key]
-        level = round(random.uniform(low, high), 1) if sensor_type == SensorType.AMONIA else random.randint(low, high)
+        level = round(random.uniform(low, high), 1) if device_type in PPM_TYPES else random.randint(low, high)
         return {
-            "device_id": self.device_id(sensor_type, washroom),
-            "type": sensor_type.value,
+            "device_id": self.device_id(device_type, toilet),
+            "type": device_type,
             "battery": random.randint(20, 100),
             "level": level,
         }
@@ -118,9 +127,11 @@ class Command(BaseCommand):
         return response.json()
 
     def cleanup(self):
-        devices, _ = SensorDevice.objects.filter(id__startswith=DUMMY_PREFIX).delete()
-        responses, _ = CustomerResponse.objects.filter(device_id__startswith=DUMMY_PREFIX).delete()
+        # Readings and ratings cascade with their devices.
+        devices = DeviceList.objects.filter(id__startswith=DUMMY_PREFIX)
+        count = devices.count()
+        devices.delete()
         clients, _ = ApiClient.objects.filter(name=DUMMY_CLIENT).delete()
         self.stdout.write(self.style.SUCCESS(
-            f"Deleted dummy devices + readings ({devices} rows), {responses} ratings, {clients} test key."
+            f"Deleted {count} dummy devices (with their readings and ratings) and {clients} test key."
         ))

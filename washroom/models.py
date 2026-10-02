@@ -4,6 +4,15 @@ import secrets
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
+from core.models import DeviceList
+
+# DeviceList.type values (defined by the dashboard app) that send level readings through this API.
+READING_TYPES = ["soap", "toilet-paper", "tissue", "trash", "ammonia"]
+# DeviceList.type of the customer rating button.
+SATISFACTION_TYPE = "satisfaction"
+# Ammonia level is a concentration in ppm; every other reading type is a fill level in %.
+PPM_TYPES = {"ammonia"}
+
 
 def hash_key(raw_key):
     return hashlib.sha256(raw_key.encode()).hexdigest()
@@ -35,65 +44,8 @@ class ApiClient(models.Model):
 
     @property
     def is_authenticated(self):
-        # Lets DRF's IsAuthenticated-style checks treat an ApiClient like a logged-in principal.
+        # Lets DRF's IsAuthenticated check treat an ApiClient like a logged-in principal.
         return True
-
-
-class WashroomConfig(models.Model):
-    """Singleton row with dashboard settings editable from Admin."""
-
-    offline_after_minutes = models.PositiveIntegerField(
-        default=30, help_text="A device with no reading for longer than this is shown as Offline."
-    )
-
-    class Meta:
-        verbose_name = "washroom config"
-
-    def __str__(self):
-        return f"Offline after {self.offline_after_minutes} minute(s)"
-
-    @classmethod
-    def get(cls):
-        return cls.objects.get_or_create(pk=1)[0]
-
-
-class SensorType(models.TextChoices):
-    AMONIA = "amonia", "Amonia"
-    SOAP = "soap", "Soap"
-    TISSUE = "tissue", "Tissue Roll"
-    TOILET_PAPER = "toilet_paper", "Toilet Paper"
-    TRASH = "trash", "Trash Bin"
-    # Customer rating button; registered automatically by POST /customer-responses/.
-    FEEDBACK = "feedback", "Customer Satisfaction"
-
-
-# Types that send level readings (everything except the feedback button), in dashboard order.
-READING_TYPES = [SensorType.SOAP, SensorType.TOILET_PAPER, SensorType.TISSUE, SensorType.TRASH, SensorType.AMONIA]
-
-
-class Gender(models.TextChoices):
-    PRIA = "pria", "Pria"
-    WANITA = "wanita", "Wanita"
-    DIFABEL = "difabel", "Difabel"
-
-
-class Washroom(models.Model):
-    """One toilet area shown as one dashboard: building + floor + gender."""
-
-    building = models.CharField(max_length=100)
-    floor = models.CharField(max_length=50, help_text='Label shown in the filter, e.g. "Lantai 2"')
-    gender = models.CharField(max_length=10, choices=Gender.choices)
-    # ZK people counters (core.DeviceList) installed at this washroom's entrance.
-    people_counters = models.ManyToManyField("core.DeviceList", blank=True, related_name="washrooms")
-
-    class Meta:
-        ordering = ("building", "floor", "gender")
-        constraints = [
-            models.UniqueConstraint(fields=("building", "floor", "gender"), name="unique_washroom"),
-        ]
-
-    def __str__(self):
-        return f"{self.building} - {self.floor} - {self.get_gender_display()}"
 
 
 class Severity(models.TextChoices):
@@ -105,7 +57,9 @@ class Severity(models.TextChoices):
 class StatusRule(models.Model):
     """Maps a sensor level to a condition label: matches when min_level <= level < max_level."""
 
-    sensor_type = models.CharField(max_length=20, choices=SensorType.choices)
+    sensor_type = models.CharField(
+        max_length=20, choices=[c for c in DeviceList.TYPE_CHOICES if c[0] in READING_TYPES]
+    )
     condition = models.CharField(max_length=50)
     severity = models.CharField(max_length=10, choices=Severity.choices)
     min_level = models.FloatField(null=True, blank=True, help_text="Inclusive. Empty = no lower bound.")
@@ -123,37 +77,13 @@ class StatusRule(models.Model):
         )
 
 
-class SensorDevice(models.Model):
-    id = models.CharField(primary_key=True, max_length=100, help_text="Device serial, e.g. 588C819FAF3E")
-    type = models.CharField(max_length=20, choices=SensorType.choices)
-    name = models.CharField(max_length=100, blank=True)
-    location = models.CharField(max_length=255, blank=True)
-    # Assigned in Admin; unassigned devices are not shown on any dashboard.
-    washroom = models.ForeignKey(
-        Washroom, on_delete=models.SET_NULL, null=True, blank=True, related_name="devices"
-    )
-    # Latest reading, denormalized so the dashboard needs one query.
-    last_seen = models.DateTimeField(null=True, blank=True)
-    last_battery = models.IntegerField(null=True, blank=True)
-    last_level = models.FloatField(null=True, blank=True)
-    last_condition = models.CharField(max_length=50, blank=True)
-    last_severity = models.CharField(max_length=10, choices=Severity.choices, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        verbose_name = "sensor device"
-
-    def __str__(self):
-        return f"{self.name or self.get_type_display()} ({self.id})"
-
-
 class SensorReading(models.Model):
-    device = models.ForeignKey(SensorDevice, on_delete=models.CASCADE, related_name="readings")
+    device = models.ForeignKey(DeviceList, on_delete=models.CASCADE, related_name="sensor_readings")
     time = models.DateTimeField(db_index=True)
     battery = models.IntegerField(
         null=True, blank=True, validators=[MinValueValidator(0), MaxValueValidator(100)]
     )
-    # Fill level in % for soap/tissue/toilet_paper/trash, ammonia concentration (ppm) for amonia.
+    # Fill level in % (soap, toilet-paper, tissue, trash) or concentration in ppm (ammonia).
     level = models.FloatField(null=True, blank=True)
     condition = models.CharField(max_length=50, blank=True)
     severity = models.CharField(max_length=10, choices=Severity.choices, blank=True)
@@ -162,21 +92,22 @@ class SensorReading(models.Model):
     # Kept when the client is deleted, so revoking a key never removes data.
     client = models.ForeignKey(ApiClient, on_delete=models.SET_NULL, null=True, blank=True)
 
+    class Meta:
+        indexes = [models.Index(fields=["device", "-time"])]
+
     def __str__(self):
         return f"{self.device_id} - {self.time}"
 
 
 class CustomerResponse(models.Model):
-    """One press on a customer feedback (rating) device."""
+    """One press on a customer satisfaction (rating) device."""
 
-    device_id = models.CharField(max_length=100, help_text="Feedback device serial")
-    location = models.CharField(max_length=255, blank=True)
+    device = models.ForeignKey(DeviceList, on_delete=models.CASCADE, related_name="customer_responses")
     time = models.DateTimeField(db_index=True)
     rating = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
     comment = models.TextField(blank=True)
     payload = models.JSONField(default=dict, blank=True)
     received_at = models.DateTimeField(auto_now_add=True)
-    # Kept when the client is deleted, so revoking a key never removes data.
     client = models.ForeignKey(ApiClient, on_delete=models.SET_NULL, null=True, blank=True)
 
     def __str__(self):

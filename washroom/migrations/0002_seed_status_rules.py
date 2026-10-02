@@ -7,14 +7,14 @@ DISPENSER_RULES = [
     ("Terisi", "normal", 31, None),
 ]
 RULES = [
-    *[(sensor_type, *rule) for sensor_type in ("soap", "tissue", "toilet_paper") for rule in DISPENSER_RULES],
+    *[(sensor_type, *rule) for sensor_type in ("soap", "toilet-paper", "tissue") for rule in DISPENSER_RULES],
     ("trash", "Normal", "normal", None, 70),
     ("trash", "Hampir Penuh", "warning", 70, 90),
     ("trash", "Penuh", "critical", 90, None),
     # Ammonia in ppm: odor is noticeable around 5-10 ppm, 25 ppm is the common exposure limit.
-    ("amonia", "Normal", "normal", None, 10),
-    ("amonia", "Bau", "warning", 10, 25),
-    ("amonia", "Bahaya", "critical", 25, None),
+    ("ammonia", "Normal", "normal", None, 10),
+    ("ammonia", "Bau", "warning", 10, 25),
+    ("ammonia", "Bahaya", "critical", 25, None),
 ]
 
 
@@ -25,12 +25,10 @@ def seed(apps, schema_editor):
             sensor_type=sensor_type, condition=condition,
             defaults={"severity": severity, "min_level": min_level, "max_level": max_level},
         )
-    apps.get_model("washroom", "WashroomConfig").objects.get_or_create(pk=1)
 
 
 def unseed(apps, schema_editor):
     apps.get_model("washroom", "StatusRule").objects.all().delete()
-    apps.get_model("washroom", "WashroomConfig").objects.filter(pk=1).delete()
 
 
 class Migration(migrations.Migration):
