@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "import_export",
     "core",
     "dummy_wo",
+    "dashboard",
 ]
 
 MIDDLEWARE = [

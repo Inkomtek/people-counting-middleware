@@ -24,7 +24,7 @@ class Command(BaseCommand):
             raise CommandError("--date must be YYYY-MM-DD")
         start = timezone.make_aware(datetime.combine(day, time.min))
 
-        devices = DeviceList.objects.all()
+        devices = DeviceList.objects.filter(type=DeviceList.TYPE_PEOPLE)
         if options["device"]:
             devices = devices.filter(id=options["device"])
             if not devices:

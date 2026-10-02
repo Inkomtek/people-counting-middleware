@@ -30,20 +30,45 @@ class Endpoint(models.Model):
 
 
 class DeviceList(models.Model):
+    # Device type = the dashboard module the device belongs to. Only TYPE_PEOPLE is synced from ZK so far.
+    TYPE_PEOPLE = "people"
+    TYPE_CHOICES = [
+        (TYPE_PEOPLE, "People Counting"),
+        ("satisfaction", "Customer Satisfaction"),
+        ("soap", "Soap"),
+        ("toilet-paper", "Toilet Paper"),
+        ("tissue", "Tissue Roll"),
+        ("trash", "Trash Bin"),
+        ("ammonia", "Amonia"),
+    ]
+    GENDER_MALE = "male"
+    GENDER_FEMALE = "female"
+    GENDER_CHOICES = [(GENDER_MALE, "Pria"), (GENDER_FEMALE, "Wanita")]
+
     id = models.CharField(primary_key=True, max_length=100)
-    type = models.CharField(max_length=100, blank=True)
+    type = models.CharField(max_length=100, choices=TYPE_CHOICES, default=TYPE_PEOPLE)
+    # Readable label for the dashboard's device dropdown, e.g. "Pintu Utama"; falls back to the id.
+    name = models.CharField(max_length=100, blank=True)
     current_count = models.IntegerField(default=0)
     maximum_trigger = models.IntegerField(default=10)
     # False until the first sync stores existing ZK events as a baseline without counting them.
     baseline_done = models.BooleanField(default=False)
     # WIB date (from event time) that current_count belongs to; a counted event on a newer date resets it.
     count_date = models.DateField(null=True, blank=True)
+    # Location of the toilet this sensor covers (one device = one toilet); used by the dashboard filters.
+    building = models.CharField(max_length=200, blank=True)
+    floor = models.CharField(max_length=50, blank=True)
+    gender = models.CharField(max_length=10, choices=GENDER_CHOICES, blank=True)
 
     class Meta:
         verbose_name = "device"
 
     def __str__(self):
-        return self.id
+        return self.name or self.id
+
+    @property
+    def label(self):
+        return self.name or self.id
 
 
 class SchedulerConfig(models.Model):

@@ -69,7 +69,8 @@ class EndpointAdmin(admin.ModelAdmin):
 
 @admin.register(DeviceList)
 class DeviceListAdmin(admin.ModelAdmin):
-    list_display = ("id", "type", "current_count", "maximum_trigger", "baseline_done")
+    list_display = ("id", "name", "type", "building", "floor", "gender", "current_count", "maximum_trigger", "baseline_done")
+    list_filter = ("type", "building", "floor", "gender")
     list_editable = ("maximum_trigger",)
 
 

@@ -1,0 +1,91 @@
+{% load static %}<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Washroom Dashboard{% endblock %} · {{ toilet.building|default:"Washroom" }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{% static 'dashboard/dashboard.css' %}">
+<script>
+  try { var t = localStorage.getItem("wd-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+</head>
+<body>
+<div class="page">
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">
+        <img src="{% static 'dashboard/img/wirapandulogo.jpg' %}" alt="Wirapandu" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'logo-fallback',textContent:'WIRAPANDU'}))">
+      </span>
+      <span class="logo">
+        <img src="{% static 'dashboard/img/isslogo.jpg' %}" alt="ISS" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'logo-fallback',textContent:'ISS'}))">
+      </span>
+    </div>
+    <div class="topbar-right">
+      <form class="date-nav" method="get">
+        <input type="hidden" name="building" value="{{ toilet.building }}">
+        <input type="hidden" name="floor" value="{{ toilet.floor }}">
+        <input type="hidden" name="gender" value="{{ toilet.gender }}">
+        {% if selected_device %}<input type="hidden" name="device" value="{{ selected_device.id }}">{% endif %}
+        <a class="icon-btn" href="?{{ nav_query }}&date={{ prev_day|date:'Y-m-d' }}" aria-label="Hari sebelumnya">{% include "dashboard/_icon.html" with name="chevron-left" %}</a>
+        <label class="date-pill">
+          {% include "dashboard/_icon.html" with name="calendar" %}
+          <span>{% if is_today %}Hari ini · {% endif %}{{ day|date:"D, d M Y" }}</span>
+          <input type="date" name="date" value="{{ day|date:'Y-m-d' }}" max="{% now 'Y-m-d' %}" onchange="this.form.submit()" aria-label="Pilih tanggal">
+        </label>
+        {% if next_day %}<a class="icon-btn" href="?{{ nav_query }}&date={{ next_day|date:'Y-m-d' }}" aria-label="Hari berikutnya">{% include "dashboard/_icon.html" with name="chevron-right" %}</a>{% endif %}
+      </form>
+      <span class="updated" data-updated>{% include "dashboard/_icon.html" with name="refresh" %} Diperbarui {% now "H:i" %} WIB</span>
+      <button type="button" class="icon-btn" data-theme-toggle aria-label="Ganti tema terang/gelap">{% include "dashboard/_icon.html" with name="moon" %}</button>
+    </div>
+  </header>
+
+  <section class="location">
+    <div>
+      {% block breadcrumb %}{% endblock %}
+      <h1>{{ toilet.building|default:"Lokasi belum diatur" }}</h1>
+      <div class="chips">
+        {% if toilet.floor %}<span class="chip">Lantai {{ toilet.floor }}</span>{% endif %}
+        {% if toilet.gender %}<span class="chip">{{ toilet.gender_label }}</span>{% endif %}
+        {% block chips %}{% endblock %}
+      </div>
+    </div>
+    <form class="filters" method="get">
+      <input type="hidden" name="date" value="{{ day|date:'Y-m-d' }}">
+      {% if options.buildings|length > 1 %}
+      <label class="field"><span>Gedung</span>
+        <select name="building" onchange="this.form.submit()">
+          {% for b in options.buildings %}<option value="{{ b }}" {% if b == toilet.building %}selected{% endif %}>{{ b }}</option>{% endfor %}
+        </select>
+      </label>
+      {% else %}<input type="hidden" name="building" value="{{ toilet.building }}">{% endif %}
+      <label class="field"><span>Lantai</span>
+        <select name="floor" onchange="this.form.submit()">
+          {% for f in options.floors %}<option value="{{ f }}" {% if f == toilet.floor %}selected{% endif %}>Lantai {{ f }}</option>{% empty %}<option>–</option>{% endfor %}
+        </select>
+      </label>
+      <label class="field"><span>Gender</span>
+        <select name="gender" onchange="this.form.submit()">
+          {% for value, label in options.genders %}<option value="{{ value }}" {% if value == toilet.gender %}selected{% endif %}>{{ label }}</option>{% empty %}<option>–</option>{% endfor %}
+        </select>
+      </label>
+      {% block extra_filters %}{% endblock %}
+      <noscript><button type="submit" class="btn">Terapkan</button></noscript>
+    </form>
+  </section>
+
+  <main id="content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <span>Smart Washroom · Wirapandu × ISS</span>
+    <span>Semua waktu dalam WIB · Data diperbarui otomatis setiap menit</span>
+  </footer>
+</div>
+{% block drawer %}{% endblock %}
+<script src="{% static 'dashboard/dashboard.js' %}"></script>
+</body>
+</html>

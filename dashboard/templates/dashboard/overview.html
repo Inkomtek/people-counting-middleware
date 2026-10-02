@@ -1,0 +1,43 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Overview{% endblock %}
+
+{% block content %}
+<div class="bento">
+  {% for s in sections %}
+  {% if s.active %}
+  <a class="card section section--active" href="{% url 'dashboard:people_counting' %}?{{ filter_query }}">
+    <div class="section-head">
+      <span class="section-icon">{% include "dashboard/_icon.html" with name=s.icon %}</span>
+    </div>
+    <h2 class="section-name">{{ s.name }}</h2>
+    <div class="section-metric">
+      <span class="metric">{{ kpis.people_in }}</span>
+      <span class="metric-label">orang masuk {% if is_today %}hari ini{% else %}{{ day|date:"d M" }}{% endif %}</span>
+    </div>
+    <div class="section-stats">
+      <div><span class="muted">Device</span><strong>{{ people_devices }}</strong></div>
+      <div><span class="muted">Work Order</span><strong>{{ kpis.wo_sent }}</strong></div>
+    </div>
+    {% for c in kpis.counters %}
+    <div class="counter-row small">
+      <span class="counter-head"><span class="truncate">{% if kpis.counters|length > 1 %}{{ c.label }}{% else %}Hitungan saat ini{% endif %}</span><strong>{{ c.current_count }} / {{ c.maximum_trigger }}</strong></span>
+      <div class="progress" role="progressbar" aria-valuenow="{{ c.progress }}" aria-valuemin="0" aria-valuemax="100" aria-label="Progres {{ c.label }} menuju Work Order berikutnya">
+        <span style="width: {{ c.progress }}%"{% if c.progress >= 80 %} class="warn"{% endif %}></span>
+      </div>
+    </div>
+    {% endfor %}
+    <span class="section-link">Lihat detail {% include "dashboard/_icon.html" with name="arrow-right" %}</span>
+  </a>
+  {% else %}
+  <div class="card section section--soon" aria-disabled="true">
+    <div class="section-head">
+      <span class="section-icon">{% include "dashboard/_icon.html" with name=s.icon %}</span>
+      <span class="badge badge--soon">Segera Hadir</span>
+    </div>
+    <h2 class="section-name">{{ s.name }}</h2>
+    <span class="metric metric--empty">—</span>
+  </div>
+  {% endif %}
+  {% endfor %}
+</div>
+{% endblock %}
