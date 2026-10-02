@@ -16,17 +16,16 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import include, path
-from django.views.generic import RedirectView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from washroom import pages
 
 urlpatterns = [
-    path('', RedirectView.as_view(pattern_name='washroom-dashboard-page')),
     path('dashboard/', pages.dashboard, name='washroom-dashboard-page'),
     path('admin/', admin.site.urls),
     path('dummy/', include('dummy_wo.urls')),
     path('api/v1/', include('washroom.urls')),
     path('api/schema/', SpectacularAPIView.as_view(), name='api-schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='api-schema'), name='api-docs'),
+    path('', include('dashboard.urls')),
 ]

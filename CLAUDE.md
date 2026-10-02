@@ -52,7 +52,7 @@ The ZK side only POSTs washroom sensor data and rating presses; **we** show the 
 - `GET /api/v1/washrooms/` (filters) and `GET /api/v1/dashboard/?washroom=<id>&date=YYYY-MM-DD` (default first washroom, today; future date → 400). Both accept an API key or a staff Admin session; POST endpoints accept only API keys.
 - Dashboard data (`washroom/services.py:build_dashboard`): `people_in` = `in` + `Cross Line` events that day, `work_orders` = NotificationLog that day, `current_count`/`maximum_trigger` today only. Sensor cards per type in `READING_TYPES` order; `available=false` → "Segera Hadir"; several devices of one type → the worst severity is shown. Past dates use each device's last reading of that day and `online` is null.
 - Condition is computed by the server: `StatusRule` per type matches `min_level <= level < max_level` (seeded in `washroom/0002`, editable in Admin) → `condition` + `severity` (`normal`/`warning`/`critical`).
-- Page: `washroom/pages.py` + `washroom/templates/washroom/dashboard.html` (staff only, `/` redirects there), vanilla JS, refreshes every 15s only when viewing today, light/dark theme.
+- Page: `washroom/pages.py` + `washroom/templates/washroom/dashboard.html` (staff only; `/` is the team dashboard from `dashboard/`), vanilla JS, refreshes every 15s only when viewing today, light/dark theme.
 - Errors are always `{"status": "error", "message": ..., "errors"?: [...]}` (`washroom/exceptions.py`).
 
 ## Commands
@@ -76,12 +76,27 @@ Use the venv: `.venv\Scripts\python` (deps in `requirements.txt`). Config comes 
 - The dummy Work Order URL inside Docker is `http://web.internal:8000/dummy/api_iot.php` (dotted network alias, because Admin's URLField rejects bare `web`). `web.internal` must be in `DJANGO_ALLOWED_HOSTS`.
 - Only one `scheduler` container may run, otherwise events are processed twice.
 
+## Dashboard (public, `dashboard/` app — decisions 2026-10-02)
+
+Design: Claude Design canvas "Washroom Dashboard Screens" (https://claude.ai/artifact/QUWp7a1vDfAXLi1Y7Viu47) + design system "Washroom Dashboard" (https://claude.ai/artifact/W1mHduWJgrHXB8P7f5xHVu). Screens: Overview (7 section cards; only People Counting active, others "Segera Hadir"), dark + mobile variants, People Counting detail, Work Order drawer, states.
+
+- Built as Django pages in this project (not React, not merged into washroom.inovasiadiwarna.com).
+- Public, no login (Admin stays login-only).
+- A toilet = building + floor + gender (fields on `DeviceList`); Lantai/Gender filters pick the toilet.
+- `DeviceList.type` = the module a device belongs to (`people`, `satisfaction`, `soap`, `toilet-paper`, `tissue`, `trash`, `ammonia`); a toilet can have several devices per module. Each module page has a "Device" dropdown (default "Semua device" = summed; per-device counters/thresholds listed separately). `DeviceList.name` is the dropdown label (falls back to id).
+- Only `type="people"` devices are synced from ZK (`sync_all`, `backfill_events`).
+- People Counting: KPIs (IN today, current_count/maximum_trigger labelled "saat ini" even for past dates, WO sent today success/failed, sensor status), hourly IN chart with WO markers, Rekap Harian (+CSV/Excel), Riwayat Work Order (wo_id from `response.wo_id`, "–" if failed), drawer with request/response JSON. No device/sensor log table on the dashboard (removed at user request; SensorLog stays in Admin).
+- No sensor ONLINE/OFFLINE status on the dashboard (removed at user request); SensorLog stays in Admin.
+- Mask the Algospection/dummy `token` in the drawer (e.g. `iss_b2f•••••`).
+- Auto-refresh data every 1 minute.
+
 ## Code Layout
 
 - `core/services.py` — the whole sync engine (`ZKClient`, `fetch_new_events`, `sync_device`, `dispatch_work_orders`, `backfill_events`, `sync_all`). `fetch_new_events` stops after `MAX_PAGES` (50) pages per cycle.
 - `core/management/commands/run_scheduler.py` — APScheduler loop; re-reads `SchedulerConfig` every 30s to apply interval changes.
 - Exports (export only, CSV/XLSX): `EventLog`, `SensorLog`, `NotificationLog` via django-import-export (`core/resources.py`, follows active Admin filters); Daily recap via its own `?export=csv|xlsx` on the recap page (`build_recap_rows` in `core/admin.py`, with `date_from`/`date_to` filter; exports include every day).
 - `core/admin.py` — log models are read-only; `EventLog` has a custom `TimeRangeFilter` (from/to datetime); `DailyRecap` (proxy of `EventLog`, migration `0004`) renders a per-day recap page (events, counted, Work Orders sent/success/failed) from `core/templates/admin/core/dailyrecap/change_list.html`.
+- `dashboard/` — public dashboard: `/` overview, `/people-counting/` detail, `/people-counting/rekap.<csv|xlsx>`. `queries.py` holds all reads (token masking in `mask_secrets`); `static/dashboard/` has the CSS (light/dark tokens), JS (drawer, theme, 1-min refresh) and logos (`img/isslogo.jpg`, `img/wirapandulogo.jpg`; text fallback when missing).
 - `dummy_wo/` — local stand-in for Algospection `api_iot.php`. Uses its own token (`DUMMY_WO_TOKEN`), deliberately different from the real one.
 - Tests mock `requests`; they never call ZK or Algospection.
 
