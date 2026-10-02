@@ -4,10 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Django 6.0 project for a people-counting middleware. Early stage: one app (`core`) with a placeholder `EventLog` model exposed via Django admin. No views/URLs/tests implemented yet. No `requirements.txt`, README, or lint config exists.
+Django 6.0 project for a people-counting middleware. The sync engine, scheduler, Admin and dummy Work Order API are implemented and tested. No README or lint config exists.
 
-- `server/` — project config (settings, root URLconf, WSGI/ASGI). Currently SQLite at `db.sqlite3` (committed); target is PostgreSQL.
-- `core/` — main app. The current `EventLog` (`event_type`, `description`, `logged_at`) is scaffolding and does not match the spec below.
+- `server/` — project config (settings, root URLconf, WSGI/ASGI). PostgreSQL only; settings read everything from `.env` via python-dotenv (`DJANGO_SECRET_KEY` is required).
+- `core/` — main app: models, sync engine, Admin, management commands.
+- `dummy_wo/` — local stand-in for the Algospection Work Order API.
+- `washroom/` — REST API (DRF) for external systems to send washroom sensor data and read the dashboard snapshot. See "Washroom API" below.
 - Python 3.12 is installed at `%LOCALAPPDATA%\Programs\Python\Python312\`. PostgreSQL 16 is installed locally.
 - Reference docs in repo root: `PRD - People Counting Middleware.pdf`, flowchart PNG, `Level3 Open API-*.pdf` (ZK API), `Dokumentasi_API_Integrasi_WO_IoT_Algospection*.pdf` (Work Order API). Extract text with `pdftotext -layout`.
 
@@ -27,16 +29,31 @@ Middleware that polls ZK people-counting sensors and creates a Work Order in Alg
 7. If `current_count >= maximum_trigger` → POST Work Order to the notification endpoint, log to `NotificationLog` (no retry), then reset `current_count` to 0 even if the POST failed.
 
 **Models:**
-- `Endpoint`: `id`, `url`, `head` (JSON), `body` (JSON), plus a type field: `token` / `event` / `notification`. Holds 3 rows: ZK token, ZK event, Work Order target.
-- `DeviceList`: `id` (ZK device ID; initial `2069691213314072577`), `type`, `current_count` (default 0), `maximum_trigger` (default 10, editable in Admin).
-- `EventLog`: `id` (ZK event id), `metadata_id`, `time`, `track_id`, `event_type`, `recognition_target`, `height`, `device` FK.
-- `SensorLog`: log of ZK requests — `id` (UUID), `status`, `response` (JSON), `time`, `endpoint_url`, `device` FK.
+- `Endpoint`: `id`, `url`, `head` (JSON), `body` (JSON), `type` (`token` / `event` / `notification`), `is_active` (only active notification endpoints are POSTed to). Seeded rows: `zk-token`, `zk-event`, `work-order` (dummy, active), `work-order-real` (Algospection, **inactive** until access is granted). `head`/`body` may contain `{{client_id}}`, `{{client_secret}}`, `{{algospection_token}}`, filled from `.env` at request time.
+- `DeviceList`: `id` (ZK device ID; initial `2069691213314072577`), `type`, `current_count` (default 0), `maximum_trigger` (default 10, editable in Admin), `baseline_done` (False until the first sync stores the baseline), `count_date` (WIB day the current count belongs to).
+- `SchedulerConfig`: singleton (`pk=1`) with `interval_minutes` (default 1) and `enabled`.
+- `EventLog`: `id` (ZK event id), `metadata_id`, `time`, `track_id`, `event_type`, `recognition_target`, `height`, `device` FK, `counted` (whether it was added to `current_count`).
+- `SensorLog`: log of ZK requests — `id` (UUID), `status` (`ONLINE`/`OFFLINE`), `response` (JSON), `time`, `endpoint_url`, `device` FK (null for token requests). The access token is never stored.
 - `NotificationLog`: log of Work Order POSTs — `id` (UUID), `time`, `device` FK, `endpoint_url`, `body`, `head`, `response` (JSON), `response_status`.
 - All FKs use `on_delete=CASCADE`.
 
 **Work Order target (Algospection, `https://issid-inspection.com/api_iot.php`):** not accessible yet, so build a **dummy API** in a separate Django app (e.g. `dummy_wo`, `POST /dummy/api_iot.php`). It validates the static `token` and required fields, stores requests in its own table (visible in Admin), and replies like the Algospection doc (`{"status":"success","message":"Work Order berhasil dibuat","wo_id":...}`, or 401 `{"status":"error",...}`). The notification `Endpoint` points to the dummy for now. Body uses the doc example values but with the dummy token, `INSTANCE: "prod"`, `LOC_ID: "GRAHA ISS BINTARO"`, `ASSET_ID: "SPACE-GRAHAISS-0020"`, `REQ_TYP: "CHECK-ROOM-TOILET"`, `REQ_DESC: "Toilet Traffic Counter"`.
 
-**Secrets:** ZK client ID/secret and DB credentials go in `.env` (never committed).
+**Secrets:** ZK client ID/secret, `ALGOSPECTION_TOKEN`, `DUMMY_WO_TOKEN` and DB credentials go in `.env` (never committed).
+
+## Washroom API (decisions confirmed with user, 2026-10-02)
+
+The ZK side only POSTs washroom sensor data and rating presses; **we** show the dashboard (`/dashboard/`, design copied from the other team's dashboard: building title, Lantai/Gender filters, date navigation, People Counting hero card, other cards "Segera Hadir" until a device exists). We define the payload format.
+
+- `Washroom` = building + floor + gender (unique); one dashboard per washroom. `people_counters` (M2M to `core.DeviceList`) links ZK counters; `SensorDevice.washroom` links sensors (assigned in Admin; unassigned devices appear on no dashboard). `washroom/0004` seeds GRAHA ISS BINTARO / Lantai 2 / Pria with ZK device `2069691213314072577`.
+- Auth: `X-API-Key` header, one `ApiClient` per external system (Admin or `create_api_client`; raw key shown once, only SHA-256 hash stored). `/api/docs/` (Swagger) and `/api/schema/` are public.
+- `POST /api/v1/readings/` — JSON object or list (max 500, all or nothing): `device_id`, `type` (`soap` / `toilet_paper` / `tissue` / `trash` / `amonia`), optional `time` (default now; naive = WIB), `battery` (0-100), `level` (% or ppm for amonia), `location`. Unknown devices are auto-registered; a type different from the registered one is rejected. `GET` lists readings.
+- `POST /api/v1/customer-responses/` — `device_id`, `rating` (1-5), optional `time`, `location`, `comment`. Auto-registers the device as `SensorDevice` type `feedback` (a sensor's ID cannot send ratings). `GET` lists them.
+- `GET /api/v1/washrooms/` (filters) and `GET /api/v1/dashboard/?washroom=<id>&date=YYYY-MM-DD` (default first washroom, today; future date → 400). Both accept an API key or a staff Admin session; POST endpoints accept only API keys.
+- Dashboard data (`washroom/services.py:build_dashboard`): `people_in` = `in` + `Cross Line` events that day, `work_orders` = NotificationLog that day, `current_count`/`maximum_trigger` today only. Sensor cards per type in `READING_TYPES` order; `available=false` → "Segera Hadir"; several devices of one type → the worst severity is shown. Past dates use each device's last reading of that day and `online` is null.
+- Condition is computed by the server: `StatusRule` per type matches `min_level <= level < max_level` (seeded in `washroom/0002`, editable in Admin) → `condition` + `severity` (`normal`/`warning`/`critical`).
+- Page: `washroom/pages.py` + `washroom/templates/washroom/dashboard.html` (staff only, `/` redirects there), vanilla JS, refreshes every 15s only when viewing today, light/dark theme.
+- Errors are always `{"status": "error", "message": ..., "errors"?: [...]}` (`washroom/exceptions.py`).
 
 ## Commands
 
@@ -49,6 +66,8 @@ Use the venv: `.venv\Scripts\python` (deps in `requirements.txt`). Config comes 
 - Migrations: `python manage.py makemigrations` then `python manage.py migrate` (`core/0002` seeds endpoints, the device and scheduler config)
 - All tests: `python manage.py test`; single test: `python manage.py test core.tests.SyncDeviceTests.test_counts_only_in_cross_line`
 - Admin user: `python manage.py createsuperuser`
+- Washroom API key: `python manage.py create_api_client <name> [--regenerate]` (prints the key once; Docker: `docker compose exec web python manage.py create_api_client <name>`)
+- Washroom API end-to-end test: `python manage.py send_dummy_data [--scenario random|normal|warning|critical] [--washroom ID] [--ratings N] [--base-url URL]` registers `DUMMY-*` devices on the washroom and POSTs readings + ratings over HTTP with a regenerated `dummy-tester` key; `--cleanup` removes them. Docker: `docker compose exec web python manage.py send_dummy_data --base-url http://127.0.0.1:8000`
 
 ## Docker
 
@@ -59,9 +78,10 @@ Use the venv: `.venv\Scripts\python` (deps in `requirements.txt`). Config comes 
 
 ## Code Layout
 
-- `core/services.py` — the whole sync engine (`ZKClient`, `fetch_new_events`, `sync_device`, `dispatch_work_orders`).
+- `core/services.py` — the whole sync engine (`ZKClient`, `fetch_new_events`, `sync_device`, `dispatch_work_orders`, `backfill_events`, `sync_all`). `fetch_new_events` stops after `MAX_PAGES` (50) pages per cycle.
 - `core/management/commands/run_scheduler.py` — APScheduler loop; re-reads `SchedulerConfig` every 30s to apply interval changes.
 - Exports (export only, CSV/XLSX): `EventLog`, `SensorLog`, `NotificationLog` via django-import-export (`core/resources.py`, follows active Admin filters); Daily recap via its own `?export=csv|xlsx` on the recap page (`build_recap_rows` in `core/admin.py`, with `date_from`/`date_to` filter; exports include every day).
+- `core/admin.py` — log models are read-only; `EventLog` has a custom `TimeRangeFilter` (from/to datetime); `DailyRecap` (proxy of `EventLog`, migration `0004`) renders a per-day recap page (events, counted, Work Orders sent/success/failed) from `core/templates/admin/core/dailyrecap/change_list.html`.
 - `dummy_wo/` — local stand-in for Algospection `api_iot.php`. Uses its own token (`DUMMY_WO_TOKEN`), deliberately different from the real one.
 - Tests mock `requests`; they never call ZK or Algospection.
 
