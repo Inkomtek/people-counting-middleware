@@ -169,10 +169,14 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "washroom.exceptions.api_exception_handler",
 }
 
+# Public base URL of this server, shown in the API docs (temporary: the dev server's IP + Nginx port).
+API_BASE_URL = os.getenv("API_BASE_URL", "http://192.168.10.120:8080").rstrip("/")
+
 SPECTACULAR_SETTINGS = {
     "TITLE": "Washroom API",
     "DESCRIPTION": "Endpoints for external systems to send washroom sensor data and read the dashboard snapshot.",
     "VERSION": "1.0.0",
+    "SERVERS": [{"url": API_BASE_URL, "description": "Dev server"}],
     "SERVE_INCLUDE_SCHEMA": False,
     # The docs page itself is public; every API call still needs X-API-Key.
     "SERVE_PERMISSIONS": ["rest_framework.permissions.AllowAny"],

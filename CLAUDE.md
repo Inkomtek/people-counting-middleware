@@ -53,6 +53,7 @@ The ZK side POSTs washroom sensor data and rating presses through this API (`was
 - `GET` on both endpoints lists history, filterable by `device_id`, `building`, `floor`, `gender`, `time_from`, `time_to` (readings also `type`); responses include the device's building/floor/gender.
 - Condition is computed by the server: `StatusRule` per type matches `min_level <= level < max_level` (seeded in `washroom/0002`, editable in Admin) → `condition` + `severity` (`normal`/`warning`/`critical`).
 - Errors are always `{"status": "error", "message": ..., "errors"?: [...]}` (`washroom/exceptions.py`).
+- Base URL shown in Swagger comes from `API_BASE_URL` (.env; temporary default `http://192.168.10.120:8080`, the dev server). Integration guide for the ZK side: `docs/Dokumentasi_API_Washroom.pdf` (Indonesian; regenerate it when endpoints or the base URL change).
 
 ## Commands
 
