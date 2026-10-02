@@ -18,10 +18,7 @@ from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from washroom import pages
-
 urlpatterns = [
-    path('dashboard/', pages.dashboard, name='washroom-dashboard-page'),
     path('admin/', admin.site.urls),
     path('dummy/', include('dummy_wo.urls')),
     path('api/v1/', include('washroom.urls')),

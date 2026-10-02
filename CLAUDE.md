@@ -43,7 +43,7 @@ Middleware that polls ZK people-counting sensors and creates a Work Order in Alg
 
 ## Washroom API (decisions confirmed with user, 2026-10-02)
 
-The ZK side only POSTs washroom sensor data and rating presses; **we** show the dashboard (`/dashboard/`, design copied from the other team's dashboard: building title, Lantai/Gender filters, date navigation, People Counting hero card, other cards "Segera Hadir" until a device exists). We define the payload format.
+The ZK side only POSTs washroom sensor data and rating presses through this API; we define the payload format. The **only** dashboard is the team's `dashboard/` app (decision 2026-10-02: our own `/dashboard/` page was removed). Its sensor cards are not yet wired to this API's data (still "Segera Hadir").
 
 - `Washroom` = building + floor + gender (unique); one dashboard per washroom. `people_counters` (M2M to `core.DeviceList`) links ZK counters; `SensorDevice.washroom` links sensors (assigned in Admin; unassigned devices appear on no dashboard). `washroom/0004` seeds GRAHA ISS BINTARO / Lantai 2 / Pria with ZK device `2069691213314072577`.
 - Auth: `X-API-Key` header, one `ApiClient` per external system (Admin or `create_api_client`; raw key shown once, only SHA-256 hash stored). `/api/docs/` (Swagger) and `/api/schema/` are public.
@@ -52,7 +52,6 @@ The ZK side only POSTs washroom sensor data and rating presses; **we** show the 
 - `GET /api/v1/washrooms/` (filters) and `GET /api/v1/dashboard/?washroom=<id>&date=YYYY-MM-DD` (default first washroom, today; future date → 400). Both accept an API key or a staff Admin session; POST endpoints accept only API keys.
 - Dashboard data (`washroom/services.py:build_dashboard`): `people_in` = `in` + `Cross Line` events that day, `work_orders` = NotificationLog that day, `current_count`/`maximum_trigger` today only. Sensor cards per type in `READING_TYPES` order; `available=false` → "Segera Hadir"; several devices of one type → the worst severity is shown. Past dates use each device's last reading of that day and `online` is null.
 - Condition is computed by the server: `StatusRule` per type matches `min_level <= level < max_level` (seeded in `washroom/0002`, editable in Admin) → `condition` + `severity` (`normal`/`warning`/`critical`).
-- Page: `washroom/pages.py` + `washroom/templates/washroom/dashboard.html` (staff only; `/` is the team dashboard from `dashboard/`), vanilla JS, refreshes every 15s only when viewing today, light/dark theme.
 - Errors are always `{"status": "error", "message": ..., "errors"?: [...]}` (`washroom/exceptions.py`).
 
 ## Commands

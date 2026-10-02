@@ -79,7 +79,8 @@ class Command(BaseCommand):
             self.stdout.write(f"  feedback      {len(values)} ratings, average {sum(values) / len(values):.1f}")
 
         self.stdout.write(self.style.SUCCESS(
-            f"\nDone. Open {options['base_url']}/dashboard/?washroom={washroom.pk} to check the cards."
+            f"\nDone. Check the stored data in Admin -> Sensor readings, or (logged in to Admin) at "
+            f"{options['base_url']}/api/v1/dashboard/?washroom={washroom.pk}"
         ))
         self.stdout.write("Remove the dummy data later with: python manage.py send_dummy_data --cleanup")
 

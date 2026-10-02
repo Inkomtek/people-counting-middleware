@@ -283,15 +283,9 @@ class DashboardTimezoneTests(ApiTestCase):
         self.assertTrue(self.get(DASHBOARD_URL).json()["generated_at"].endswith("+07:00"))
 
 
-class DashboardPageTests(ApiTestCase):
-    def test_page_requires_admin_login(self):
-        response = self.client.get("/dashboard/")
-        self.assertEqual(response.status_code, 302)
-        self.assertIn("/admin/login/", response["Location"])
-
-    def test_staff_session_sees_page_and_api(self):
+class SessionAccessTests(ApiTestCase):
+    def test_staff_session_can_read_dashboard_api(self):
         self.client.force_login(User.objects.create_user("staff", password="pw", is_staff=True))
-        self.assertContains(self.client.get("/dashboard/"), "Washroom Dashboard")
         body = self.client.get(DASHBOARD_URL).json()
         self.assertIn("status_rules", body)
         self.assertEqual(body["offline_after_minutes"], 30)
