@@ -1,0 +1,266 @@
+{
+  "info": {
+    "name": "Washroom API",
+    "description": "Collection folder for testing the Washroom API on https://unpopular-unwieldy-tables.ngrok-free.dev. Update the xApiKey variable before running the requests. Note: device_id must already exist in Admin; the API does not auto-create devices.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://unpopular-unwieldy-tables.ngrok-free.dev",
+      "type": "string"
+    },
+    {
+      "key": "xApiKey",
+      "value": "lt4lP2mgc65ktGoNCDtfQ65BkAp0V-HIedfU6RqAm8M",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Washroom API",
+      "item": [
+        {
+          "name": "GET /api/v1/readings/",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{xApiKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/readings/?type=soap&building=GRAHA%20ISS%20BINTARO&floor=2&gender=male",
+              "query": [
+                { "key": "type", "value": "soap" },
+                { "key": "building", "value": "GRAHA ISS BINTARO" },
+                { "key": "floor", "value": "2" },
+                { "key": "gender", "value": "male" }
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "readings"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/readings/ (single)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{xApiKey}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_id\": \"POSTMAN-SOAP-01\",\n  \"type\": \"soap\",\n  \"battery\": 92,\n  \"level\": 44\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/readings/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "readings"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/readings/ (batch)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{xApiKey}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"device_id\": \"POSTMAN-SOAP-01\",\n    \"type\": \"soap\",\n    \"level\": 45,\n    \"battery\": 90\n  },\n  {\n    \"device_id\": \"POSTMAN-TOILET-PAPER-01\",\n    \"type\": \"toilet-paper\",\n    \"level\": 36,\n    \"battery\": 88\n  },\n  {\n    \"device_id\": \"POSTMAN-TISSUE-01\",\n    \"type\": \"tissue\",\n    \"level\": 28,\n    \"battery\": 80\n  },\n  {\n    \"device_id\": \"POSTMAN-TRASH-01\",\n    \"type\": \"trash\",\n    \"level\": 72,\n    \"battery\": 85\n  },\n  {\n    \"device_id\": \"POSTMAN-AMMONIA-01\",\n    \"type\": \"ammonia\",\n    \"level\": 12.5,\n    \"battery\": 91\n  }\n]"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/readings/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "readings"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/readings/ (toilet-paper)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json", "type": "text" },
+              { "key": "X-API-Key", "value": "{{xApiKey}}", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_id\": \"POSTMAN-TOILET-PAPER-01\",\n  \"type\": \"toilet-paper\",\n  \"battery\": 88,\n  \"level\": 36\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/readings/",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "readings"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/readings/ (trash)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json", "type": "text" },
+              { "key": "X-API-Key", "value": "{{xApiKey}}", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_id\": \"POSTMAN-TRASH-01\",\n  \"type\": \"trash\",\n  \"battery\": 85,\n  \"level\": 72\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/readings/",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "readings"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/readings/ (ammonia)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json", "type": "text" },
+              { "key": "X-API-Key", "value": "{{xApiKey}}", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_id\": \"POSTMAN-AMMONIA-01\",\n  \"type\": \"ammonia\",\n  \"battery\": 91,\n  \"level\": 12.5\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/readings/",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "readings"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/customer-responses/",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{xApiKey}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customer-responses/?floor=2&gender=male",
+              "query": [
+                { "key": "floor", "value": "2" },
+                { "key": "gender", "value": "male" }
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customer-responses"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/customer-responses/",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{xApiKey}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_id\": \"POSTMAN-FEEDBACK-01\",\n  \"rating\": 5,\n  \"comment\": \"Toilet bersih\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/customer-responses/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customer-responses"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Open API docs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/docs/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "docs"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
