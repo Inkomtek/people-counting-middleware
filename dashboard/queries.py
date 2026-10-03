@@ -3,12 +3,13 @@
 import json
 from datetime import datetime, time, timedelta
 
-from django.db.models import Count, Q
+from django.db.models import Avg, Count, Q
 from django.db.models.functions import ExtractHour, TruncDate
 from django.utils import timezone
 
 from core.models import DeviceList, EventLog, NotificationLog
 from core.services import COUNTED_EVENT_TYPES, COUNTED_RECOGNITION_TARGET
+from washroom.models import SATISFACTION_TYPE, CustomerResponse, SensorReading
 
 RECAP_DAYS = 30
 SUCCESS = Q(response_status__startswith="2")
@@ -71,6 +72,45 @@ def kpis(devices, day):
         "wo_success": success,
         "wo_failed": sent - success,
     }
+
+
+def module_summary(module, toilet, day):
+    """Latest sensor reading or satisfaction average for one module at one toilet and date."""
+    devices = DeviceList.objects.filter(
+        type=module,
+        building=toilet["building"],
+        floor=toilet["floor"],
+        gender=toilet["gender"],
+    )
+    start, end = day_bounds(day)
+    summary = {"has_data": False, "device_count": devices.count()}
+
+    if module == SATISFACTION_TYPE:
+        responses = CustomerResponse.objects.filter(device__in=devices, time__gte=start, time__lt=end)
+        stats = responses.aggregate(average=Avg("rating"), count=Count("id"))
+        if stats["count"]:
+            latest = responses.select_related("device").order_by("-time", "-id").first()
+            summary.update(
+                has_data=True,
+                average_rating=stats["average"],
+                rating_progress=round(stats["average"] * 20),
+                response_count=stats["count"],
+                latest=latest,
+            )
+        return summary
+
+    latest = (
+        SensorReading.objects.filter(device__in=devices, time__gte=start, time__lt=end)
+        .select_related("device").order_by("-time", "-id").first()
+    )
+    if latest:
+        summary.update(
+            has_data=True,
+            latest=latest,
+            level_progress=(max(0, min(round(latest.level), 100))
+                            if latest.level is not None and module != "ammonia" else None),
+        )
+    return summary
 
 
 def hourly(devices, day):

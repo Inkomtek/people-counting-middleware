@@ -85,7 +85,15 @@ def overview(request):
     devices = _module_devices(ctx, DeviceList.TYPE_PEOPLE)
     ctx["people_devices"] = len(devices)
     ctx["kpis"] = queries.kpis(devices, ctx["day"])
-    ctx["sections"] = SECTIONS
+    ctx["sections"] = [
+        {
+            **section,
+            "summary": None if section.get("active") else queries.module_summary(
+                section["key"], ctx["toilet"], ctx["day"],
+            ),
+        }
+        for section in SECTIONS
+    ]
     return render(request, "dashboard/overview.html", ctx)
 
 

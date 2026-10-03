@@ -105,6 +105,7 @@ h1, h2 { margin: 0; letter-spacing: -.01em; }
 .section--active { grid-column: span 2; grid-row: span 2; transition: transform .15s, box-shadow .15s; }
 .section--active:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(31, 79, 216, .12); }
 .section--soon { opacity: .72; }
+.section--module { min-width: 0; }
 .section-head { display: flex; justify-content: space-between; align-items: center; }
 .section-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: var(--accent-soft); color: var(--accent); }
 .section--soon .section-icon { background: var(--surface-2); color: var(--soon); }
@@ -117,9 +118,20 @@ h1, h2 { margin: 0; letter-spacing: -.01em; }
 .section-link { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 700; }
 .metric { font-size: 44px; font-weight: 800; line-height: 1.05; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 .section--active .metric { font-size: 64px; }
+.section--module .metric { font-size: 40px; }
 .metric small { font-size: 18px; font-weight: 600; color: var(--muted); }
 .metric--empty { color: var(--soon); font-size: 32px; margin-top: auto; }
 .metric-label { color: var(--muted); font-weight: 600; }
+.module-readout { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.module-meter { display: flex; flex-direction: column; gap: 5px; }
+.module-meter-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.module-meter .progress { height: 6px; }
+.module-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }
+.module-meta .truncate { min-width: 0; }
+.section--module > .module-meta:last-child { margin-top: auto; }
+.module-feedback { display: flex; flex-direction: column; gap: 2px; padding-top: 4px; font-size: 12px; overflow-wrap: anywhere; }
+.module-feedback strong { color: var(--ink-2); }
+.module-feedback span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--muted); }
 
 .progress { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
 .progress span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }

@@ -6,6 +6,7 @@ from django.utils import timezone
 from core import services
 from core.models import DeviceList, EventLog, NotificationLog
 from dashboard.queries import mask_secrets
+from washroom.models import CustomerResponse, SensorReading
 
 DEVICE_ID = "2069691213314072577"
 LOCATION = {"building": "GRAHA ISS BINTARO", "floor": "2", "gender": "male"}
@@ -50,6 +51,38 @@ class DashboardTests(TestCase):
         self.assertContains(response, "GRAHA ISS BINTARO")
         self.assertContains(response, "Segera Hadir", count=6)
         self.assertEqual(response.context["kpis"]["people_in"], 2)
+
+    def test_overview_shows_sensor_data_for_selected_toilet(self):
+        soap = DeviceList.objects.create(id="soap-2-male", type="soap", name="Soap dispenser", **LOCATION)
+        SensorReading.objects.create(
+            device=soap, time=timezone.localtime(), level=44, battery=92, condition="Terisi", severity="normal",
+        )
+        DeviceList.objects.create(id="soap-3-female", type="soap", **{**LOCATION, "floor": "3", "gender": "female"})
+        response = self.client.get("/")
+        soap_section = next(section for section in response.context["sections"] if section["key"] == "soap")
+        self.assertTrue(soap_section["summary"]["has_data"])
+        self.assertEqual(soap_section["summary"]["latest"].level, 44)
+        self.assertContains(response, "44")
+        self.assertContains(response, "92%")
+        self.assertContains(response, 'aria-label="Baterai Soap dispenser"')
+        self.assertContains(response, 'style="width: 92%"')
+        self.assertContains(response, "Soap dispenser")
+        self.assertContains(response, "Segera Hadir", count=5)
+
+    def test_overview_shows_customer_rating_summary(self):
+        feedback = DeviceList.objects.create(id="feedback-2-male", type="satisfaction", **LOCATION)
+        CustomerResponse.objects.create(device=feedback, time=timezone.localtime(), rating=4, comment="Cukup bersih")
+        CustomerResponse.objects.create(device=feedback, time=timezone.localtime(), rating=5, comment="Bersih")
+        response = self.client.get("/")
+        section = next(section for section in response.context["sections"] if section["key"] == "satisfaction")
+        self.assertTrue(section["summary"]["has_data"])
+        self.assertEqual(section["summary"]["average_rating"], 4.5)
+        self.assertEqual(section["summary"]["rating_progress"], 90)
+        self.assertContains(response, "4.5")
+        self.assertContains(response, "90%")
+        self.assertContains(response, "Rating terakhir: 5/5")
+        self.assertContains(response, "Bersih")
+        self.assertContains(response, "2 rating")
 
     def test_people_counting_kpis_and_tables(self):
         response = self.client.get("/people-counting/")
