@@ -9,11 +9,16 @@ TIME_HELP = "ISO 8601. Without offset it is read as WIB. Default: time received.
 
 
 def check_device_type(device_id, expected_type):
-    """Reject a device_id already registered in DeviceList with another type."""
-    registered = DeviceList.objects.filter(pk=device_id).values_list("type", flat=True).first()
-    if registered and registered != expected_type:
+    """Reject unknown or mismatched device IDs; only Admin-managed devices are accepted."""
+    registered = DeviceList.objects.filter(pk=device_id).first()
+    if not registered:
         raise serializers.ValidationError(
-            {"device_id": f"Device {device_id} terdaftar sebagai '{registered}', bukan '{expected_type}'."}
+            {"device_id": "Device ID tidak terdaftar di admin. Harap daftarkan device terlebih dahulu."}
+        )
+
+    if registered.type != expected_type:
+        raise serializers.ValidationError(
+            {"device_id": f"Device {device_id} terdaftar sebagai '{registered.type}', bukan '{expected_type}'."}
         )
 
 

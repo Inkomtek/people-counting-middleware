@@ -20,9 +20,12 @@ def evaluate_condition(sensor_type, level, rules=None):
 
 
 def _get_device(device_id, device_type):
-    # Unknown devices are registered without a location; Admin sets building/floor/gender so the
-    # dashboard can place them. Only "people" devices are synced from ZK, so these never are.
-    device, _ = DeviceList.objects.get_or_create(id=device_id, defaults={"type": device_type})
+    """Only Admin-managed devices are allowed. Unknown device IDs are rejected earlier in validation."""
+    device = DeviceList.objects.filter(id=device_id).first()
+    if device is None:
+        raise ValueError(f"Device ID {device_id} tidak terdaftar di admin.")
+    if device.type != device_type:
+        raise ValueError(f"Device {device_id} terdaftar sebagai '{device.type}', bukan '{device_type}'.")
     return device
 
 

@@ -106,9 +106,9 @@ class ReadingListCreateView(generics.ListAPIView):
         summary="Send sensor readings",
         description=(
             "Send one reading as a JSON object, or up to 500 as a JSON list (all or nothing). `type` is the "
-            "device type used by the dashboard. A device_id not yet in the device list is registered with that "
-            "type; set its building / floor / gender in Admin so the dashboard shows it. The condition (Terisi, "
-            "Hampir Habis, Habis, Penuh, ...) is computed by the server from the Status rules in Admin."
+            "device type used by the dashboard. `device_id` must already exist in Admin `DeviceList`; the API "
+            "rejects unknown or mismatched device IDs. The condition (Terisi, Hampir Habis, Habis, Penuh, ...) "
+            "is computed by the server from the Status rules in Admin."
         ),
         request=ReadingInSerializer(many=True),
         responses={
@@ -143,8 +143,9 @@ class CustomerResponseListCreateView(generics.ListAPIView):
     @extend_schema(
         summary="Send customer responses",
         description=(
-            "One rating press (1-5) as a JSON object, or up to 500 as a JSON list (all or nothing). The device "
-            "is a `satisfaction` device in the device list (registered automatically if unknown)."
+            "One rating press (1-5) as a JSON object, or up to 500 as a JSON list (all or nothing). The "
+            "`device_id` must already exist in Admin `DeviceList` and must be a `satisfaction` device. Unknown or "
+            "mismatched IDs are rejected."
         ),
         request=CustomerResponseInSerializer(many=True),
         responses={

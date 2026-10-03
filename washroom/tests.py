@@ -94,21 +94,33 @@ class ReadingTests(ApiTestCase):
         reading = SensorReading.objects.get()
         self.assertEqual((reading.payload["level"], reading.client), (28, self.api_client))
 
-    def test_unknown_device_is_registered_with_type_and_no_location(self):
-        self.assertEqual(self.post(READINGS_URL, {"device_id": "NEW", "type": "toilet-paper", "level": 0}).status_code, 201)
-        device = DeviceList.objects.get(id="NEW")
-        self.assertEqual((device.type, device.building), ("toilet-paper", ""))
+    def test_unknown_device_is_rejected(self):
+        DeviceList.objects.all().delete()
+        response = self.post(READINGS_URL, {"device_id": "NEW", "type": "soap", "level": 0})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Device ID tidak terdaftar", response.json()["errors"][0]["errors"]["device_id"][0])
+        self.assertFalse(DeviceList.objects.filter(id="NEW").exists())
+
+    def test_registered_device_type_must_match_payload(self):
+        DeviceList.objects.create(id="SOAP-01", type="trash")
+        response = self.post(READINGS_URL, {"device_id": "SOAP-01", "type": "soap", "level": 20})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("device_id", response.json()["errors"][0]["errors"])
+        self.assertIn("terdaftar sebagai 'trash'", response.json()["errors"][0]["errors"]["device_id"][0])
 
     def test_registered_devices_are_never_synced_from_zk(self):
         from core import services
 
-        self.post(READINGS_URL, {"device_id": "NEW", "type": "soap", "level": 50})
+        DeviceList.objects.create(id="SOAP-ADMIN-01", type="soap")
         with mock.patch.object(services, "sync_device") as sync_device, \
                 mock.patch.object(services.ZKClient, "__init__", return_value=None):
             services.sync_all()
-        self.assertNotIn("NEW", [call.args[0].id for call in sync_device.call_args_list])
+        self.assertNotIn("SOAP-ADMIN-01", [call.args[0].id for call in sync_device.call_args_list])
 
     def test_batch_reading(self):
+        DeviceList.objects.create(id="A", type="soap")
+        DeviceList.objects.create(id="B", type="trash")
+        DeviceList.objects.create(id="C", type="ammonia")
         response = self.post(READINGS_URL, [
             {"device_id": "A", "type": "soap", "level": 100},
             {"device_id": "B", "type": "trash", "level": 95},
@@ -118,6 +130,7 @@ class ReadingTests(ApiTestCase):
         self.assertEqual([r["condition"] for r in response.json()["data"]], ["Terisi", "Penuh", "Bahaya"])
 
     def test_invalid_item_rejects_whole_batch(self):
+        DeviceList.objects.create(id="A", type="soap")
         response = self.post(READINGS_URL, [
             {"device_id": "A", "type": "soap", "level": 50},
             {"device_id": "B", "type": "amonia", "level": 5},
@@ -125,7 +138,7 @@ class ReadingTests(ApiTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["errors"][0]["index"], 1)
         self.assertFalse(SensorReading.objects.exists())
-        self.assertFalse(DeviceList.objects.filter(id="A").exists())
+        self.assertTrue(DeviceList.objects.filter(id="A").exists())
 
     def test_percent_level_over_100_rejected(self):
         self.assertEqual(self.post(READINGS_URL, {"device_id": "A", "type": "soap", "level": 120}).status_code, 400)
@@ -157,13 +170,21 @@ class ReadingTests(ApiTestCase):
 
 
 class CustomerResponseTests(ApiTestCase):
-    def test_post_rating_registers_satisfaction_device(self):
+    def test_post_rating_on_registered_satisfaction_device(self):
+        DeviceList.objects.create(id="FB01", type="satisfaction")
         response = self.post(RESPONSES_URL, {"device_id": "FB01", "rating": 5, "comment": "bersih"})
         self.assertEqual(response.status_code, 201, response.json())
         self.assertEqual(CustomerResponse.objects.get().rating, 5)
         self.assertEqual(DeviceList.objects.get(id="FB01").type, "satisfaction")
 
+    def test_unknown_device_is_rejected(self):
+        response = self.post(RESPONSES_URL, {"device_id": "FB-UNKNOWN", "rating": 5, "comment": "bersih"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Device ID tidak terdaftar", response.json()["errors"][0]["errors"]["device_id"][0])
+        self.assertFalse(DeviceList.objects.filter(id="FB-UNKNOWN").exists())
+
     def test_rating_out_of_range_rejected(self):
+        DeviceList.objects.create(id="FB01", type="satisfaction")
         self.assertEqual(self.post(RESPONSES_URL, {"device_id": "FB01", "rating": 6}).status_code, 400)
 
     def test_sensor_device_cannot_send_ratings(self):
