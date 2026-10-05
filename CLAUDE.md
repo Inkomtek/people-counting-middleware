@@ -11,7 +11,7 @@ Django 6.0 project for a people-counting middleware. The sync engine, scheduler,
 - `dummy_wo/` — local stand-in for the Algospection Work Order API.
 - `washroom/` — REST API (DRF) for the ZK side to send washroom sensor data and ratings, on `core.DeviceList`. See "Washroom API" below.
 - `dashboard/` — the public dashboard (team-built). See "Dashboard" below.
-- Python 3.12 is installed at `%LOCALAPPDATA%\Programs\Python\Python312\`. PostgreSQL 16 is installed locally.
+- Runs on Linux with Python 3.12 (venv in `.venv/`). PostgreSQL 16 runs locally.
 - Reference docs in repo root: `PRD - People Counting Middleware.pdf`, flowchart PNG, `Level3 Open API-*.pdf` (ZK API), `Dokumentasi_API_Integrasi_WO_IoT_Algospection*.pdf` (Work Order API). Extract text with `pdftotext -layout`.
 
 ## Product Spec (PRD + decisions confirmed with user, 2026-10-01)
@@ -44,7 +44,7 @@ Middleware that polls ZK people-counting sensors and creates a Work Order in Alg
 
 ## Washroom API (decisions confirmed with user, 2026-10-02)
 
-The ZK side POSTs washroom sensor data and rating presses through this API (`washroom/` app); we define the payload format. The API follows the dashboard's data model exactly (decision 2026-10-02): no device/location models of its own, everything hangs off `core.DeviceList` (`type`, `building`, `floor`, `gender`). The only dashboard is the team's `dashboard/` app; its sensor cards are not wired to this data yet (still "Segera Hadir").
+The ZK side POSTs washroom sensor data and rating presses through this API (`washroom/` app); we define the payload format. The API follows the dashboard's data model exactly (decision 2026-10-02): no device/location models of its own, everything hangs off `core.DeviceList` (`type`, `building`, `floor`, `gender`). The only dashboard is the team's `dashboard/` app: its Overview cards show the latest `SensorReading` / today's `CustomerResponse` average for the selected toilet and date (`dashboard/queries.py::module_summary`); a module with devices but no data shows "Menunggu data", one without devices "Segera Hadir". Only People Counting has a detail page.
 
 - Auth: `X-API-Key` header, one `ApiClient` per external system (Admin or `create_api_client`; raw key shown once, only SHA-256 hash stored). Admin sessions cannot call the API. `/api/docs/` (Swagger) and `/api/schema/` are public.
 - `POST /api/v1/readings/` — JSON object or list (max 500, all or nothing): `device_id`, `type` (`soap` / `toilet-paper` / `tissue` / `trash` / `ammonia`, i.e. `DeviceList.type`), optional `time` (default now; naive = WIB), `battery` (0-100), `level` (%, or ppm for ammonia). Stored in `SensorReading` (FK to `DeviceList`) with the raw `payload`.
@@ -53,11 +53,11 @@ The ZK side POSTs washroom sensor data and rating presses through this API (`was
 - `GET` on both endpoints lists history, filterable by `device_id`, `building`, `floor`, `gender`, `time_from`, `time_to` (readings also `type`); responses include the device's building/floor/gender.
 - Condition is computed by the server: `StatusRule` per type matches `min_level <= level < max_level` (seeded in `washroom/0002`, editable in Admin) → `condition` + `severity` (`normal`/`warning`/`critical`).
 - Errors are always `{"status": "error", "message": ..., "errors"?: [...]}` (`washroom/exceptions.py`).
-- Base URL shown in Swagger comes from `API_BASE_URL` (.env; temporary default `http://192.168.10.120:8080`, the dev server). Integration guide for the ZK side: `docs/Dokumentasi_API_Washroom.pdf` (Indonesian; regenerate it when endpoints or the base URL change).
+- Base URL shown in Swagger comes from `API_BASE_URL` (.env; temporary default `http://192.168.10.120:8080`, the dev server). Integration guide for the ZK side: `docs/Dokumentasi_API_Washroom.md` → `.pdf` (Indonesian) plus a Postman collection in `docs/`; when endpoints or the base URL change, edit the `.md` and regenerate with `sh docs/build_washroom_api_pdf.sh` (runs pandoc/xelatex in Docker).
 
 ## Commands
 
-Use the venv: `.venv\Scripts\python` (deps in `requirements.txt`). Config comes from `.env` (template: `.env.example`). PostgreSQL 16 runs locally on 5432, DB `people_counting`.
+Use the venv: `.venv/bin/python` (deps in `requirements.txt`). Config comes from `.env` (template: `.env.example`). PostgreSQL 16 runs locally on 5432, DB `people_counting`.
 
 - Web + Admin + dummy Work Order API: `python manage.py runserver`
 - Scheduler (separate terminal, keeps running): `python manage.py run_scheduler`
@@ -78,16 +78,15 @@ Use the venv: `.venv\Scripts\python` (deps in `requirements.txt`). Config comes 
 
 ## Dashboard (public, `dashboard/` app — decisions 2026-10-02)
 
-Design: Claude Design canvas "Washroom Dashboard Screens" (https://claude.ai/artifact/QUWp7a1vDfAXLi1Y7Viu47) + design system "Washroom Dashboard" (https://claude.ai/artifact/W1mHduWJgrHXB8P7f5xHVu). Screens: Overview (7 section cards; only People Counting active, others "Segera Hadir"), dark + mobile variants, People Counting detail, Work Order drawer, states.
+Design: Claude Design canvas "Washroom Dashboard Screens" (https://claude.ai/artifact/QUWp7a1vDfAXLi1Y7Viu47) + design system "Washroom Dashboard" (https://claude.ai/artifact/W1mHduWJgrHXB8P7f5xHVu). Screens: Overview (7 section cards), dark + mobile variants, People Counting detail, states. The canvas still shows a Work Order drawer; it was removed from the build (2026-10-05).
 
 - Built as Django pages in this project (not React, not merged into washroom.inovasiadiwarna.com).
 - Public, no login (Admin stays login-only).
 - A toilet = building + floor + gender (fields on `DeviceList`); Lantai/Gender filters pick the toilet.
 - `DeviceList.type` = the module a device belongs to (`people`, `satisfaction`, `soap`, `toilet-paper`, `tissue`, `trash`, `ammonia`); a toilet can have several devices per module. Each module page has a "Device" dropdown (default "Semua device" = summed; per-device counters/thresholds listed separately). `DeviceList.name` is the dropdown label (falls back to id).
 - Only `type="people"` devices are synced from ZK (`sync_all`, `backfill_events`).
-- People Counting: KPIs (IN today, current_count/maximum_trigger labelled "saat ini" even for past dates, WO sent today success/failed, sensor status), hourly IN chart with WO markers, Rekap Harian (+CSV/Excel), Riwayat Work Order (wo_id from `response.wo_id`, "–" if failed), drawer with request/response JSON. No device/sensor log table on the dashboard (removed at user request; SensorLog stays in Admin).
+- People Counting: KPIs (visitors IN today, current_count/maximum_trigger labelled "saat ini" even for past dates, WO sent today success/failed), hourly IN chart with WO markers and busiest hour, recap daily or monthly (+CSV/Excel), Riwayat Work Order with status (success/failed) and date-range filters; the WO number column comes from `response.wo_id` ("–" when failed; re-added 2026-10-05). No destination or detail drawer. No device/sensor log table on the dashboard (removed at user request; SensorLog stays in Admin).
 - No sensor ONLINE/OFFLINE status on the dashboard (removed at user request); SensorLog stays in Admin.
-- Mask the Algospection/dummy `token` in the drawer (e.g. `iss_b2f•••••`).
 - Auto-refresh: `dashboard.js` re-fetches the page every `SchedulerConfig.dashboard_refresh_seconds` (Admin, 10–3600 s) and swaps `#content` + `[data-alerts]`; shows "Diperbarui HH:MM:SS", an offline banner with backoff, refreshes on tab focus. A server-side stale banner appears when the last ONLINE SensorLog is older than max(5 min, 3 × sync interval) (today only).
 - Language: ID (default) / EN via `?lang=` → cookie `wd_lang`. All UI text lives in `dashboard/i18n.py` (dict, no gettext — `msgfmt` is not installed); templates use `{{ t.key }}` or `{% tr "key" n=… %}` (`dashboard/templatetags/dashboard_tags.py`). Views are wrapped in `@localized` so dates/numbers (`|intcomma`) follow the language. Module names come from i18n `module_<type>`.
 - Fonts are local (`static/dashboard/fonts`, OFL); custom `templates/404.html` / `500.html`.
@@ -98,7 +97,7 @@ Design: Claude Design canvas "Washroom Dashboard Screens" (https://claude.ai/art
 - `core/management/commands/run_scheduler.py` — APScheduler loop; re-reads `SchedulerConfig` every 30s to apply interval changes.
 - Exports (export only, CSV/XLSX): `EventLog`, `SensorLog`, `NotificationLog` via django-import-export (`core/resources.py`, follows active Admin filters); Daily recap via its own `?export=csv|xlsx` on the recap page (`build_recap_rows` in `core/admin.py`, with `date_from`/`date_to` filter; exports include every day).
 - `core/admin.py` — log models are read-only; `EventLog` has a custom `TimeRangeFilter` (from/to datetime); `DailyRecap` (proxy of `EventLog`, migration `0004`) renders a per-day recap page (events, counted, Work Orders sent/success/failed) from `core/templates/admin/core/dailyrecap/change_list.html`.
-- `dashboard/` — public dashboard: `/` overview, `/people-counting/` detail, `/people-counting/rekap.<csv|xlsx>`. `queries.py` holds all reads (token masking in `mask_secrets`); `static/dashboard/` has the CSS (light/dark tokens), JS (drawer, theme, 1-min refresh) and logos (`img/isslogo.jpg`, `img/wirapandulogo.jpg`; text fallback when missing).
+- `dashboard/` — public dashboard: `/` overview, `/people-counting/` detail, `/people-counting/rekap.<csv|xlsx>`. `queries.py` holds all reads; `views.py` builds the context (toilet/device/date filters, `@localized`); `static/dashboard/` has the CSS (light/dark tokens), JS (theme, auto-refresh) and logos (`img/isslogo.jpg`, `img/wirapandulogo.jpg`; text fallback when missing).
 - `dummy_wo/` — local stand-in for Algospection `api_iot.php`. Uses its own token (`DUMMY_WO_TOKEN`), deliberately different from the real one.
 - Tests mock `requests`; they never call ZK or Algospection.
 
