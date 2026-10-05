@@ -30,24 +30,24 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
         scheduler = BlockingScheduler(timezone="Asia/Jakarta")
-        state = {"interval": SchedulerConfig.get().interval_minutes}
+        state = {"interval": SchedulerConfig.get().interval_seconds}
 
         scheduler.add_job(
-            run_sync, "interval", minutes=state["interval"], id=SYNC_JOB_ID,
+            run_sync, "interval", seconds=state["interval"], id=SYNC_JOB_ID,
             max_instances=1, coalesce=True,
         )
 
         def check_config():
             close_old_connections()
-            interval = SchedulerConfig.get().interval_minutes
+            interval = SchedulerConfig.get().interval_seconds
             if interval != state["interval"]:
-                scheduler.reschedule_job(SYNC_JOB_ID, trigger="interval", minutes=interval)
+                scheduler.reschedule_job(SYNC_JOB_ID, trigger="interval", seconds=interval)
                 state["interval"] = interval
-                logger.info("Sync interval changed to %s minute(s)", interval)
+                logger.info("Sync interval changed to %s second(s)", interval)
 
         scheduler.add_job(check_config, "interval", seconds=CONFIG_CHECK_SECONDS, id="check_config")
 
-        self.stdout.write(f"Scheduler started: sync every {state['interval']} minute(s). Ctrl+C to stop.")
+        self.stdout.write(f"Scheduler started: sync every {state['interval']} second(s). Ctrl+C to stop.")
         run_sync()
         try:
             scheduler.start()

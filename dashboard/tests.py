@@ -1,11 +1,14 @@
 from unittest import mock
 
-from django.test import TestCase
+from datetime import timedelta
+
+from django.test import TestCase, override_settings
 from django.utils import timezone
+from django.utils.formats import date_format
+from django.utils.translation import override
 
 from core import services
-from core.models import DeviceList, EventLog, NotificationLog
-from dashboard.queries import mask_secrets
+from core.models import DeviceList, EventLog, NotificationLog, SchedulerConfig, SensorLog
 from washroom.models import CustomerResponse, SensorReading
 
 DEVICE_ID = "2069691213314072577"
@@ -92,8 +95,10 @@ class DashboardTests(TestCase):
         self.assertEqual([(c["current_count"], c["progress"]) for c in kpis["counters"]], [(8, 40)])
         self.assertEqual((kpis["wo_sent"], kpis["wo_success"], kpis["wo_failed"]), (2, 1, 1))
         self.assertNotIn("online", kpis)
-        self.assertContains(response, "WO-000128")
+        self.assertNotContains(response, "WO-000128")
         self.assertEqual(response.context["recap"][0]["people_in"], 2)
+        self.assertEqual(response.context["recap"][0]["sent"], 2)
+        self.assertNotContains(response, "Event Diterima")
 
     def test_all_devices_are_summed_by_default(self):
         self.add_people_device("dev-b", "Pintu Belakang", count=3, events=5)
@@ -101,7 +106,7 @@ class DashboardTests(TestCase):
         kpis = response.context["kpis"]
         self.assertEqual(kpis["people_in"], 7)
         self.assertEqual(len(kpis["counters"]), 2)
-        self.assertContains(response, "Semua device (2)")
+        self.assertContains(response, "Semua perangkat (2)")
 
     def test_device_filter_narrows_to_one_device(self):
         self.add_people_device("dev-b", "Pintu Belakang", count=3, events=5)
@@ -116,25 +121,42 @@ class DashboardTests(TestCase):
         response = self.client.get("/people-counting/", {"gender": "male"})
         self.assertEqual([d.id for d in response.context["module_devices"]], [DEVICE_ID])
 
-    def test_drawer_masks_token(self):
+    def test_work_order_status_labels_and_no_detail(self):
         response = self.client.get("/people-counting/")
+        self.assertContains(response, ">Berhasil</span>")
+        self.assertContains(response, ">Gagal</span>")
+        self.assertNotContains(response, "200 OK")
+        self.assertNotContains(response, "data-drawer")
         self.assertNotContains(response, "iss_secret_value")
-        self.assertContains(response, "iss_sec•••••")
 
-    def test_work_order_search(self):
-        response = self.client.get("/people-counting/", {"q": "WO-000128"})
-        self.assertEqual([row["wo"] for row in response.context["wo_rows"]], ["WO-000128"])
+    def test_work_order_status_filter(self):
+        response = self.client.get("/people-counting/", {"status": "failed"})
+        self.assertEqual([row["success"] for row in response.context["wo_rows"]], [False])
+        response = self.client.get("/people-counting/", {"status": "success"})
+        self.assertEqual([row["success"] for row in response.context["wo_rows"]], [True])
+        response = self.client.get("/people-counting/", {"status": "bogus"})
+        self.assertEqual(len(response.context["wo_rows"]), 2)
 
     def test_device_log_and_sensor_status_are_hidden(self):
         response = self.client.get("/people-counting/")
         self.assertNotContains(response, "Log Perangkat")
         self.assertNotContains(response, "Status sensor")
 
+    def test_monthly_recap(self):
+        response = self.client.get("/people-counting/", {"recap": "monthly"})
+        rows = response.context["recap"]
+        today = timezone.localdate()
+        self.assertEqual((rows[0]["period"], rows[0]["people_in"], rows[0]["sent"]), (today.replace(day=1), 2, 2))
+        self.assertContains(response, "Rekap Bulanan")
+
     def test_recap_exports(self):
         csv = self.client.get("/people-counting/rekap.csv")
         self.assertEqual(csv.status_code, 200)
-        self.assertIn("Orang Masuk (IN)", csv.content.decode())
-        self.assertIn("semua-device", csv["Content-Disposition"])
+        self.assertEqual(csv.content.decode().splitlines()[0], "Tanggal,Pengunjung Masuk,Work Order Terkirim")
+        self.assertIn("rekap-harian-semua-perangkat-", csv["Content-Disposition"])
+        monthly = self.client.get("/people-counting/rekap.csv", {"recap": "monthly"})
+        self.assertTrue(monthly.content.decode().startswith("Bulan,"))
+        self.assertIn("rekap-bulanan", monthly["Content-Disposition"])
         xlsx = self.client.get("/people-counting/rekap.xlsx", {"device": DEVICE_ID})
         self.assertTrue(xlsx.content.startswith(b"PK"))
         self.assertIn(DEVICE_ID, xlsx["Content-Disposition"])
@@ -143,8 +165,84 @@ class DashboardTests(TestCase):
         response = self.client.get("/", {"floor": "99"})
         self.assertEqual(response.context["toilet"]["floor"], "2")
 
-    def test_mask_secrets_nested(self):
-        self.assertEqual(mask_secrets({"a": [{"token": "abcdefghij"}]}), {"a": [{"token": "abcdefg•••••"}]})
+    # ---------- auto-refresh ----------
+    def test_refresh_interval_comes_from_scheduler_config(self):
+        config = SchedulerConfig.get()
+        config.dashboard_refresh_seconds = 45
+        config.save()
+        response = self.client.get("/people-counting/")
+        self.assertContains(response, 'data-refresh-seconds="45"')
+
+    def test_stale_banner_when_sensor_data_stopped(self):
+        log = SensorLog.objects.create(device=self.device, status=SensorLog.STATUS_ONLINE, endpoint_url="zk")
+        SensorLog.objects.filter(pk=log.pk).update(time=timezone.now() - timedelta(minutes=30))
+        response = self.client.get("/")
+        self.assertEqual(response.context["stale"]["minutes"], 30)
+        self.assertContains(response, "30 menit lalu")
+
+    def test_no_stale_banner_when_data_is_fresh_or_day_is_past(self):
+        SensorLog.objects.create(device=self.device, status=SensorLog.STATUS_ONLINE, endpoint_url="zk")
+        self.assertIsNone(self.client.get("/").context["stale"])
+        yesterday = timezone.localdate() - timedelta(days=1)
+        self.assertIsNone(self.client.get("/", {"date": yesterday.isoformat()}).context["stale"])
+
+    # ---------- busiest hour ----------
+    def test_busiest_hour(self):
+        chart = self.client.get("/people-counting/").context["chart"]
+        self.assertEqual(chart["busiest_hour"], timezone.localtime().hour)
+        self.assertEqual(chart["peak"], 2)
+
+    # ---------- language ----------
+    def test_indonesian_is_default_with_indonesian_dates_and_numbers(self):
+        self.add_people_device("dev-big", "Besar", events=0)
+        EventLog.objects.bulk_create([
+            EventLog(id=f"bulk{i}", time=timezone.localtime(), device=self.device, event_type="in",
+                     recognition_target="Cross Line")
+            for i in range(1500)
+        ])
+        response = self.client.get("/people-counting/")
+        self.assertContains(response, '<html lang="id">')
+        self.assertContains(response, "Penghitung Pengunjung")
+        self.assertContains(response, "1.502")
+        with override("id"):
+            self.assertContains(response, date_format(timezone.localdate(), "D, d M Y"))
+        with override("en"):
+            self.assertNotContains(response, date_format(timezone.localdate(), "D, d M Y"))
+
+    def test_english_via_lang_param_is_remembered(self):
+        response = self.client.get("/people-counting/", {"lang": "en"})
+        self.assertContains(response, '<html lang="en">')
+        self.assertContains(response, "Work Order History")
+        self.assertContains(response, "Visitors in today")
+        self.assertEqual(response.cookies["wd_lang"].value, "en")
+        follow_up = self.client.get("/")
+        self.assertContains(follow_up, "Visitors In Today")
+        self.assertContains(follow_up, "Coming Soon")
+
+    def test_english_export(self):
+        self.client.cookies["wd_lang"] = "en"
+        csv = self.client.get("/people-counting/rekap.csv")
+        self.assertEqual(csv.content.decode().splitlines()[0], "Date,Visitors In,Work Orders Sent")
+        self.assertIn("recap-daily-all-devices-", csv["Content-Disposition"])
+
+    # ---------- polish ----------
+    def test_no_devices_page(self):
+        DeviceList.objects.all().delete()
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Belum ada perangkat terdaftar")
+
+    @override_settings(DEBUG=False)
+    def test_custom_404(self):
+        response = self.client.get("/does-not-exist/")
+        self.assertEqual(response.status_code, 404)
+        self.assertContains(response, "Halaman tidak ditemukan", status_code=404)
+
+    def test_fonts_are_local(self):
+        response = self.client.get("/")
+        self.assertNotContains(response, "fonts.googleapis.com")
+        self.assertContains(response, "favicon.svg")
+
 
 
 class SyncScopeTests(TestCase):

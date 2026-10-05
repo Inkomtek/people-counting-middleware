@@ -32,7 +32,7 @@ Middleware that polls ZK people-counting sensors and creates a Work Order in Alg
 **Models:**
 - `Endpoint`: `id`, `url`, `head` (JSON), `body` (JSON), `type` (`token` / `event` / `notification`), `is_active` (only active notification endpoints are POSTed to). Seeded rows: `zk-token`, `zk-event`, `work-order` (dummy, active), `work-order-real` (Algospection, **inactive** until access is granted). `head`/`body` may contain `{{client_id}}`, `{{client_secret}}`, `{{algospection_token}}`, filled from `.env` at request time.
 - `DeviceList`: `id` (ZK device ID; initial `2069691213314072577`), `type`, `current_count` (default 0), `maximum_trigger` (default 10, editable in Admin), `baseline_done` (False until the first sync stores the baseline), `count_date` (WIB day the current count belongs to).
-- `SchedulerConfig`: singleton (`pk=1`) with `interval_minutes` (default 1) and `enabled`.
+- `SchedulerConfig`: singleton (`pk=1`) with `interval_seconds` (ZK sync, default 60, 10–86400), `enabled` and `dashboard_refresh_seconds`.
 - `EventLog`: `id` (ZK event id), `metadata_id`, `time`, `track_id`, `event_type`, `recognition_target`, `height`, `device` FK, `counted` (whether it was added to `current_count`).
 - `SensorLog`: log of ZK requests — `id` (UUID), `status` (`ONLINE`/`OFFLINE`), `response` (JSON), `time`, `endpoint_url`, `device` FK (null for token requests). The access token is never stored.
 - `NotificationLog`: log of Work Order POSTs — `id` (UUID), `time`, `device` FK, `endpoint_url`, `body`, `head`, `response` (JSON), `response_status`.
@@ -88,7 +88,9 @@ Design: Claude Design canvas "Washroom Dashboard Screens" (https://claude.ai/art
 - People Counting: KPIs (IN today, current_count/maximum_trigger labelled "saat ini" even for past dates, WO sent today success/failed, sensor status), hourly IN chart with WO markers, Rekap Harian (+CSV/Excel), Riwayat Work Order (wo_id from `response.wo_id`, "–" if failed), drawer with request/response JSON. No device/sensor log table on the dashboard (removed at user request; SensorLog stays in Admin).
 - No sensor ONLINE/OFFLINE status on the dashboard (removed at user request); SensorLog stays in Admin.
 - Mask the Algospection/dummy `token` in the drawer (e.g. `iss_b2f•••••`).
-- Auto-refresh data every 1 minute.
+- Auto-refresh: `dashboard.js` re-fetches the page every `SchedulerConfig.dashboard_refresh_seconds` (Admin, 10–3600 s) and swaps `#content` + `[data-alerts]`; shows "Diperbarui HH:MM:SS", an offline banner with backoff, refreshes on tab focus. A server-side stale banner appears when the last ONLINE SensorLog is older than max(5 min, 3 × sync interval) (today only).
+- Language: ID (default) / EN via `?lang=` → cookie `wd_lang`. All UI text lives in `dashboard/i18n.py` (dict, no gettext — `msgfmt` is not installed); templates use `{{ t.key }}` or `{% tr "key" n=… %}` (`dashboard/templatetags/dashboard_tags.py`). Views are wrapped in `@localized` so dates/numbers (`|intcomma`) follow the language. Module names come from i18n `module_<type>`.
+- Fonts are local (`static/dashboard/fonts`, OFL); custom `templates/404.html` / `500.html`.
 
 ## Code Layout
 

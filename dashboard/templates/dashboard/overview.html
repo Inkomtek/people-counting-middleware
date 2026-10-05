@@ -1,5 +1,6 @@
 {% extends "dashboard/base.html" %}
-{% block title %}Overview{% endblock %}
+{% load humanize dashboard_tags %}
+{% block title %}{{ t.overview }}{% endblock %}
 
 {% block content %}
 <div class="bento">
@@ -11,80 +12,80 @@
     </div>
     <h2 class="section-name">{{ s.name }}</h2>
     <div class="section-metric">
-      <span class="metric">{{ kpis.people_in }}</span>
-      <span class="metric-label">orang masuk {% if is_today %}hari ini{% else %}{{ day|date:"d M" }}{% endif %}</span>
+      <span class="metric">{{ kpis.people_in|intcomma }}</span>
+      <span class="metric-label">{% if is_today %}{{ t.visitors_in_today }}{% else %}{{ t.visitors_in }} {{ day|date:"d M" }}{% endif %}</span>
     </div>
     <div class="section-stats">
-      <div><span class="muted">Device</span><strong>{{ people_devices }}</strong></div>
-      <div><span class="muted">Work Order</span><strong>{{ kpis.wo_sent }}</strong></div>
+      <div><span class="muted">{{ t.sensors_installed }}</span><strong>{{ people_devices|intcomma }}</strong></div>
+      <div><span class="muted">{{ t.wo_sent }}</span><strong>{{ kpis.wo_sent|intcomma }}</strong></div>
     </div>
     {% for c in kpis.counters %}
     <div class="counter-row small">
-      <span class="counter-head"><span class="truncate">{% if kpis.counters|length > 1 %}{{ c.label }}{% else %}Hitungan saat ini{% endif %}</span><strong>{{ c.current_count }} / {{ c.maximum_trigger }}</strong></span>
-      <div class="progress" role="progressbar" aria-valuenow="{{ c.progress }}" aria-valuemin="0" aria-valuemax="100" aria-label="Progres {{ c.label }} menuju Work Order berikutnya">
+      <span class="counter-head"><span class="truncate">{% if kpis.counters|length > 1 %}{{ c.label }}{% else %}{{ t.towards_next_wo }}{% endif %}</span><strong>{{ c.current_count|intcomma }} / {{ c.maximum_trigger|intcomma }}</strong></span>
+      <div class="progress" role="progressbar" aria-valuenow="{{ c.progress }}" aria-valuemin="0" aria-valuemax="100" aria-label="{% tr 'progress_to_wo' name=c.label %}">
         <span style="width: {{ c.progress }}%"{% if c.progress >= 80 %} class="warn"{% endif %}></span>
       </div>
     </div>
     {% endfor %}
-    <span class="section-link">Lihat detail {% include "dashboard/_icon.html" with name="arrow-right" %}</span>
+    <span class="section-link">{{ t.see_detail }} {% include "dashboard/_icon.html" with name="arrow-right" %}</span>
   </a>
   {% else %}
     {% if s.summary.has_data %}
     <div class="card section section--module">
       <div class="section-head">
         <span class="section-icon">{% include "dashboard/_icon.html" with name=s.icon %}</span>
-        <span class="badge badge--ok">Data tersedia</span>
+        <span class="badge badge--ok">{{ t.data_available }}</span>
       </div>
       <h2 class="section-name">{{ s.name }}</h2>
       {% if s.key == "satisfaction" %}
       <div class="module-readout">
         <span class="metric">{{ s.summary.average_rating|floatformat:1 }}<small>/ 5</small></span>
-        <span class="metric-label">rata-rata · {{ s.summary.response_count }} rating</span>
+        <span class="metric-label">{% tr "average_ratings" n=s.summary.response_count|intcomma %}</span>
       </div>
       <div class="module-meter">
-        <div class="module-meter-head"><span>Kepuasan</span><span class="badge badge--ok">{{ s.summary.rating_progress }}%</span></div>
-        <div class="progress" role="progressbar" aria-valuenow="{{ s.summary.rating_progress }}" aria-valuemin="0" aria-valuemax="100" aria-label="Rata-rata kepuasan">
+        <div class="module-meter-head"><span>{{ t.satisfaction }}</span><span class="badge badge--ok">{{ s.summary.rating_progress }}%</span></div>
+        <div class="progress" role="progressbar" aria-valuenow="{{ s.summary.rating_progress }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ t.avg_satisfaction }}">
           <span style="width: {{ s.summary.rating_progress }}%"></span>
         </div>
       </div>
       <div class="module-meta">
         <span class="truncate">{{ s.summary.latest.device.label }}</span>
-        <span>Terakhir {{ s.summary.latest.time|date:"H:i" }} WIB</span>
+        <span>{% tr "last_at" time=s.summary.latest.time|date:"H:i" %}</span>
       </div>
       <div class="module-feedback">
-        <strong>Rating terakhir: {{ s.summary.latest.rating }}/5</strong>
-        <span>{{ s.summary.latest.comment|default:"Tanpa komentar" }}</span>
+        <strong>{% tr "last_rating" n=s.summary.latest.rating %}</strong>
+        <span>{{ s.summary.latest.comment|default:t.no_comment }}</span>
       </div>
       {% else %}
       <div class="module-readout">
         <span class="metric">{% if s.summary.latest.level is None %}—{% else %}{{ s.summary.latest.level|floatformat:"-1" }}{% endif %}<small>{% if s.key == "ammonia" %}ppm{% else %}%{% endif %}</small></span>
-        <span class="metric-label">{{ s.summary.latest.condition|default:"Kondisi belum tersedia" }}</span>
+        <span class="metric-label">{{ s.summary.latest.condition|default:t.condition_unknown }}</span>
       </div>
       {% if s.key != "ammonia" and s.summary.latest.level is not None %}
       <div class="module-meter">
-        <div class="module-meter-head"><span>Level</span><span class="badge badge--soon">{{ s.summary.latest.level|floatformat:"-1" }}%</span></div>
-        <div class="progress" role="progressbar" aria-valuenow="{{ s.summary.level_progress }}" aria-valuemin="0" aria-valuemax="100" aria-label="Level {{ s.name }}">
+        <div class="module-meter-head"><span>{{ t.level }}</span><span class="badge badge--soon">{{ s.summary.latest.level|floatformat:"-1" }}%</span></div>
+        <div class="progress" role="progressbar" aria-valuenow="{{ s.summary.level_progress }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ t.level }} {{ s.name }}">
           <span style="width: {{ s.summary.level_progress }}%"></span>
         </div>
       </div>
       {% elif s.key == "ammonia" and s.summary.latest.level is not None %}
-      <div class="module-meter-head"><span>Konsentrasi</span><span class="badge badge--soon">{{ s.summary.latest.level|floatformat:"-1" }} ppm</span></div>
+      <div class="module-meter-head"><span>{{ t.concentration }}</span><span class="badge badge--soon">{{ s.summary.latest.level|floatformat:"-1" }} ppm</span></div>
       {% else %}
-      <span class="module-meta">Level tidak dikirim</span>
+      <span class="module-meta">{{ t.level_not_sent }}</span>
       {% endif %}
       <div class="module-meter">
         {% if s.summary.latest.battery is not None %}
-        <div class="module-meter-head"><span>Battery</span><span class="badge badge--ok">{{ s.summary.latest.battery }}%</span></div>
-        <div class="progress" role="progressbar" aria-valuenow="{{ s.summary.latest.battery }}" aria-valuemin="0" aria-valuemax="100" aria-label="Baterai {{ s.summary.latest.device.label }}">
+        <div class="module-meter-head"><span>{{ t.battery }}</span><span class="badge badge--ok">{{ s.summary.latest.battery }}%</span></div>
+        <div class="progress" role="progressbar" aria-valuenow="{{ s.summary.latest.battery }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ t.battery }} {{ s.summary.latest.device.label }}">
           <span style="width: {{ s.summary.latest.battery }}%"></span>
         </div>
         {% else %}
-        <div class="module-meter-head"><span>Battery</span><span class="muted">Tidak dikirim</span></div>
+        <div class="module-meter-head"><span>{{ t.battery }}</span><span class="muted">{{ t.not_sent }}</span></div>
         {% endif %}
       </div>
       <div class="module-meta">
         <span class="truncate">{{ s.summary.latest.device.label }}</span>
-        <span>Terakhir {{ s.summary.latest.time|date:"H:i" }} WIB</span>
+        <span>{% tr "last_at" time=s.summary.latest.time|date:"H:i" %}</span>
       </div>
       {% endif %}
     </div>
@@ -92,7 +93,7 @@
     <div class="card section section--soon" aria-disabled="true">
       <div class="section-head">
         <span class="section-icon">{% include "dashboard/_icon.html" with name=s.icon %}</span>
-        <span class="badge badge--soon">{% if s.summary.device_count %}Menunggu data{% else %}Segera Hadir{% endif %}</span>
+        <span class="badge badge--soon">{% if s.summary.device_count %}{{ t.waiting_data }}{% else %}{{ t.coming_soon }}{% endif %}</span>
       </div>
       <h2 class="section-name">{{ s.name }}</h2>
       <span class="metric metric--empty">—</span>

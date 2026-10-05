@@ -1,0 +1,9 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ t.no_devices_title }}{% endblock %}
+{% block location %}{% endblock %}
+{% block content %}
+<section class="card empty-state">
+  <h1>{{ t.no_devices_title }}</h1>
+  <p class="muted">{{ t.no_devices_body }}</p>
+</section>
+{% endblock %}

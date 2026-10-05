@@ -1,17 +1,18 @@
 {% extends "dashboard/base.html" %}
-{% block title %}People Counting{% endblock %}
+{% load humanize dashboard_tags %}
+{% block title %}{{ module_name }}{% endblock %}
 
 {% block breadcrumb %}
-<nav class="breadcrumb" aria-label="Breadcrumb">
-  <a href="{% url 'dashboard:overview' %}?{{ filter_query }}">Overview</a><span>/</span><span aria-current="page">People Counting</span>
+<nav class="breadcrumb" aria-label="{{ t.breadcrumb }}">
+  <a href="{% url 'dashboard:overview' %}?{{ filter_query }}">{{ t.overview }}</a><span>/</span><span aria-current="page">{{ module_name }}</span>
 </nav>
 {% endblock %}
-{% block chips %}<span class="chip chip--accent">People Counting</span>{% endblock %}
+{% block chips %}<span class="chip chip--accent">{{ module_name }}</span>{% endblock %}
 
 {% block extra_filters %}
-<label class="field"><span>Device</span>
+<label class="field"><span>{{ t.device }}</span>
   <select name="device" onchange="this.form.submit()">
-    <option value="">Semua device ({{ module_devices|length }})</option>
+    <option value="">{% tr "all_devices" n=module_devices|length %}</option>
     {% for d in module_devices %}<option value="{{ d.id }}"{% if d == selected_device %} selected{% endif %}>{{ d.label }}</option>{% endfor %}
   </select>
 </label>
@@ -21,12 +22,12 @@
 {# ---------- KPIs ---------- #}
 <div class="kpis">
   <div class="card kpi">
-    <span class="kpi-label">Orang masuk {% if is_today %}hari ini{% else %}{{ day|date:"d M Y" }}{% endif %}</span>
-    <span class="metric">{{ kpis.people_in }}</span>
-    <span class="muted small">Event IN · Cross Line</span>
+    <span class="kpi-label">{% if is_today %}{{ t.visitors_in_kpi_today }}{% else %}{% tr "visitors_in_kpi_on" date=day|date:"d M Y" %}{% endif %}</span>
+    <span class="metric">{{ kpis.people_in|intcomma }}</span>
+    <span class="muted small">{{ t.crossed_sensor_line }}</span>
   </div>
   <div class="card kpi">
-    <span class="kpi-label">Hitungan saat ini</span>
+    <span class="kpi-label">{{ t.towards_next_wo }}</span>
     {% if kpis.counters|length == 1 %}{% with c=kpis.counters.0 %}
     <div class="kpi-ring">
       <span class="ring-box">
@@ -36,28 +37,28 @@
         </svg>
         <span class="ring-pct">{{ c.progress }}%</span>
       </span>
-      <span class="metric">{{ c.current_count }}<small>/{{ c.maximum_trigger }}</small></span>
+      <span class="metric">{{ c.current_count|intcomma }}<small>/{{ c.maximum_trigger|intcomma }}</small></span>
     </div>
-    <span class="muted small">{{ c.remaining }} lagi menuju Work Order berikutnya{% if not is_today %} · nilai saat ini{% endif %}</span>
+    <span class="muted small">{% tr "cleaning_after" n=c.remaining|intcomma %}{% if not is_today %} · {{ t.current_value }}{% endif %}</span>
     {% endwith %}{% elif kpis.counters %}
     <ul class="counter-list">
       {% for c in kpis.counters %}
       <li>
-        <span class="counter-head"><span class="truncate">{{ c.label }}</span><strong>{{ c.current_count }}<span class="muted">/{{ c.maximum_trigger }}</span></strong></span>
+        <span class="counter-head"><span class="truncate">{{ c.label }}</span><strong>{{ c.current_count|intcomma }}<span class="muted">/{{ c.maximum_trigger|intcomma }}</span></strong></span>
         <span class="progress"><span style="width: {{ c.progress }}%"{% if c.progress >= 80 %} class="warn"{% endif %}></span></span>
       </li>
       {% endfor %}
     </ul>
-    <span class="muted small">Ambang Work Order per device{% if not is_today %} · nilai saat ini{% endif %}</span>
+    <span class="muted small">{{ t.progress_per_device }}{% if not is_today %} · {{ t.current_value }}{% endif %}</span>
     {% else %}
     <span class="metric metric--empty">—</span>
-    <span class="muted small">Belum ada device People Counting di toilet ini</span>
+    <span class="muted small">{{ t.no_people_devices }}</span>
     {% endif %}
   </div>
   <div class="card kpi">
-    <span class="kpi-label">Work Order terkirim {% if is_today %}hari ini{% else %}{{ day|date:"d M" }}{% endif %}</span>
-    <span class="metric">{{ kpis.wo_sent }}</span>
-    <span class="small"><span class="text-ok">{{ kpis.wo_success }} berhasil</span> · <span class="{% if kpis.wo_failed %}text-bad{% else %}muted{% endif %}">{{ kpis.wo_failed }} gagal</span></span>
+    <span class="kpi-label">{% if is_today %}{{ t.wo_sent_today }}{% else %}{% tr "wo_sent_on" date=day|date:"d M" %}{% endif %}</span>
+    <span class="metric">{{ kpis.wo_sent|intcomma }}</span>
+    <span class="small"><span class="text-ok">{% tr "n_success" n=kpis.wo_success|intcomma %}</span> · <span class="{% if kpis.wo_failed %}text-bad{% else %}muted{% endif %}">{% tr "n_failed" n=kpis.wo_failed|intcomma %}</span></span>
   </div>
 </div>
 
@@ -65,20 +66,23 @@
 <section class="card">
   <div class="card-head">
     <div>
-      <h2>Lalu Lintas per Jam</h2>
-      <p class="muted small">Orang masuk (IN) per jam · {{ day|date:"D, d M Y" }}</p>
+      <h2>{{ t.hourly_traffic }}</h2>
+      <p class="muted small">{{ t.visitors_per_hour }} · {{ day|date:"D, d M Y" }}</p>
+      {% if chart.busiest_hour is not None %}
+      <p class="busiest small">{% with h=chart.busiest_hour|stringformat:"02d" %}{% tr "busiest_hour" hour=h|add:":00" n=chart.peak|intcomma %}{% endwith %}</p>
+      {% endif %}
     </div>
     <div class="legend small">
-      <span><i class="legend-bar"></i>Orang masuk</span>
-      <span><i class="legend-dot"></i>Work Order terkirim</span>
+      <span><i class="legend-bar"></i>{{ t.legend_visitors }}</span>
+      <span><i class="legend-dot"></i>{{ t.legend_wo }}</span>
     </div>
   </div>
   {% if chart.peak %}
-  <div class="chart" role="img" aria-label="Grafik orang masuk per jam, puncak {{ chart.peak }} orang">
-    <div class="chart-scale small muted"><span>{{ chart.peak }}</span><span>0</span></div>
+  <div class="chart" role="img" aria-label="{% tr 'chart_label' n=chart.peak|intcomma %}">
+    <div class="chart-scale small muted"><span>{{ chart.peak|intcomma }}</span><span>0</span></div>
     <div class="chart-bars">
       {% for b in chart.bars %}
-      <div class="bar-col" title="{{ b.hour|stringformat:'02d' }}:00 · {{ b.count }} orang{% if b.wo %} · Work Order terkirim{% endif %}">
+      <div class="bar-col{% if b.hour == chart.busiest_hour %} bar-col--peak{% endif %}" title="{% with h=b.hour|stringformat:'02d' %}{% tr 'bar_title' hour=h|add:':00' n=b.count|intcomma %}{% endwith %}{% if b.wo %} · {{ t.legend_wo }}{% endif %}">
         <div class="bar-area">
           {% if b.wo %}<i class="bar-wo"></i>{% endif %}
           <span class="bar" style="height: {{ b.pct }}%"></span>
@@ -89,37 +93,43 @@
     </div>
   </div>
   {% else %}
-  <div class="empty">Belum ada data untuk tanggal ini</div>
+  <div class="empty">{{ t.no_data_for_date }}</div>
   {% endif %}
 </section>
 
-{# ---------- Daily recap ---------- #}
-<section class="card">
+{# ---------- Recap (daily / monthly) ---------- #}
+<section class="card" id="recap">
   <div class="card-head">
     <div>
-      <h2>Rekap Harian</h2>
-      <p class="muted small">{{ recap_days }} hari terakhir s/d {{ day|date:"d M Y" }}</p>
+      <h2>{% if recap_period == "monthly" %}{{ t.recap_monthly }}{% else %}{{ t.recap_daily }}{% endif %}</h2>
+      <p class="muted small">{% if recap_period == "monthly" %}{% tr "last_n_months" n=recap_months date=day|date:"M Y" %}{% else %}{% tr "last_n_days" n=recap_days date=day|date:"d M Y" %}{% endif %}</p>
     </div>
     <div class="actions">
-      <a class="btn" href="{% url 'dashboard:export_recap' 'csv' %}?{{ filter_query }}">{% include "dashboard/_icon.html" with name="download" %} CSV</a>
-      <a class="btn" href="{% url 'dashboard:export_recap' 'xlsx' %}?{{ filter_query }}">{% include "dashboard/_icon.html" with name="file" %} Excel</a>
+      <nav class="segmented" aria-label="{{ t.recap_period }}">
+        <a href="{% querystring recap=None %}#recap"{% if recap_period != "monthly" %} aria-current="true"{% endif %}>{{ t.daily }}</a>
+        <a href="{% querystring recap='monthly' %}#recap"{% if recap_period == "monthly" %} aria-current="true"{% endif %}>{{ t.monthly }}</a>
+      </nav>
+      <a class="btn" href="{% url 'dashboard:export_recap' 'csv' %}?{{ filter_query }}&recap={{ recap_period }}">{% include "dashboard/_icon.html" with name="download" %} CSV</a>
+      <a class="btn" href="{% url 'dashboard:export_recap' 'xlsx' %}?{{ filter_query }}&recap={{ recap_period }}">{% include "dashboard/_icon.html" with name="file" %} Excel</a>
     </div>
   </div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Tanggal</th><th class="num">Event Diterima</th><th class="num">Orang Masuk (IN)</th><th class="num">Work Order Terkirim</th><th class="num">Berhasil</th><th class="num">Gagal</th></tr></thead>
+      <thead><tr><th>{% if recap_period == "monthly" %}{{ t.month }}{% else %}{{ t.date }}{% endif %}</th><th class="num">{{ t.visitors_in }}</th><th class="num">{{ t.wo_sent }}</th></tr></thead>
       <tbody>
         {% for r in recap %}
-        <tr{% if r.day == day %} class="row-current"{% endif %}>
-          <td>{{ r.day|date:"D, d M Y" }}</td>
-          <td class="num">{{ r.total }}</td>
-          <td class="num strong">{{ r.people_in }}</td>
-          <td class="num">{{ r.sent }}</td>
-          <td class="num text-ok">{{ r.success }}</td>
-          <td class="num{% if r.failed %} text-bad{% endif %}">{{ r.failed }}</td>
+        {% if recap_period == "monthly" %}
+        <tr{% if r.period.year == day.year and r.period.month == day.month %} class="row-current"{% endif %}>
+          <td>{{ r.period|date:"F Y" }}</td>
+        {% else %}
+        <tr{% if r.period == day %} class="row-current"{% endif %}>
+          <td>{{ r.period|date:"D, d M Y" }}</td>
+        {% endif %}
+          <td class="num strong">{{ r.people_in|intcomma }}</td>
+          <td class="num">{{ r.sent|intcomma }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="6" class="empty">Belum ada data</td></tr>
+        <tr><td colspan="3" class="empty">{{ t.no_data }}</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -130,8 +140,8 @@
 <section class="card" id="work-orders">
   <div class="card-head">
     <div>
-      <h2>Riwayat Work Order</h2>
-      <p class="muted small">Notifikasi ke Algospection · terbaru di atas</p>
+      <h2>{{ t.wo_history }}</h2>
+      <p class="muted small">{{ t.wo_history_sub }}</p>
     </div>
     <form class="toolbar" method="get" action="#work-orders">
       <input type="hidden" name="building" value="{{ toilet.building }}">
@@ -139,56 +149,44 @@
       <input type="hidden" name="gender" value="{{ toilet.gender }}">
       <input type="hidden" name="date" value="{{ day|date:'Y-m-d' }}">
       {% if selected_device %}<input type="hidden" name="device" value="{{ selected_device.id }}">{% endif %}
-      <label class="field"><span>Cari</span><input type="search" name="q" value="{{ wo_query }}" placeholder="No. WO atau status"></label>
-      <label class="field"><span>Dari</span><input type="datetime-local" name="from" value="{{ wo_from }}"></label>
-      <label class="field"><span>Sampai</span><input type="datetime-local" name="to" value="{{ wo_to }}"></label>
-      <button type="submit" class="btn btn--primary">{% include "dashboard/_icon.html" with name="search" %} Terapkan</button>
-      {% if wo_query or wo_from or wo_to %}<a class="btn btn--ghost" href="?{{ filter_query }}#work-orders">Reset</a>{% endif %}
+      <label class="field"><span>{{ t.status }}</span>
+        <select name="status">
+          <option value="">{{ t.status_all }}</option>
+          <option value="success"{% if wo_status == "success" %} selected{% endif %}>{{ t.success }}</option>
+          <option value="failed"{% if wo_status == "failed" %} selected{% endif %}>{{ t.failed }}</option>
+        </select>
+      </label>
+      <label class="field"><span>{{ t.from }}</span><input type="datetime-local" name="from" value="{{ wo_from }}"></label>
+      <label class="field"><span>{{ t.to }}</span><input type="datetime-local" name="to" value="{{ wo_to }}"></label>
+      <button type="submit" class="btn btn--primary">{% include "dashboard/_icon.html" with name="search" %} {{ t.apply }}</button>
+      {% if wo_status or wo_from or wo_to %}<a class="btn btn--ghost" href="?{{ filter_query }}#work-orders">{{ t.clear_filter }}</a>{% endif %}
     </form>
   </div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Waktu</th><th>No. Work Order</th><th>Device</th><th>Status</th><th><span class="sr-only">Aksi</span></th></tr></thead>
+      <thead><tr><th>{{ t.time }}</th><th>{{ t.device }}</th><th>{{ t.status }}</th></tr></thead>
       <tbody>
         {% for row in wo_rows %}
         <tr>
           <td>{{ row.log.time|date:"H:i:s" }} WIB<br><span class="muted small">{{ row.log.time|date:"D, d M Y" }}</span></td>
-          <td class="strong mono">{{ row.wo }}</td>
           <td class="small">{{ row.log.device.label }}{% if row.log.device.name %}<br><span class="muted mono">{{ row.log.device_id }}</span>{% endif %}</td>
-          <td>{% if row.success %}<span class="badge badge--ok"><i class="dot"></i>{{ row.log.response_status }}</span>{% else %}<span class="badge badge--bad"><i class="dot"></i>{{ row.log.response_status }}</span>{% endif %}</td>
-          <td class="num"><button type="button" class="btn btn--ghost btn--sm" data-drawer="wo" data-detail="{{ row.detail }}">Detail</button></td>
+          <td>{% if row.success %}<span class="badge badge--ok"><i class="dot"></i>{{ t.success }}</span>{% else %}<span class="badge badge--bad"><i class="dot"></i>{{ t.failed }}</span>{% endif %}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="5" class="empty">Belum ada Work Order{% if wo_query or wo_from or wo_to %} yang cocok dengan filter{% endif %}</td></tr>
+        <tr><td colspan="3" class="empty">{% if wo_status or wo_from or wo_to %}{{ t.no_wo_filtered }}{% else %}{{ t.no_wo }}{% endif %}</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% if wo_page.paginator.num_pages > 1 %}
-  <nav class="pager small" aria-label="Halaman Work Order">
-    <span class="muted">{{ wo_page.start_index }}–{{ wo_page.end_index }} dari {{ wo_page.paginator.count }}</span>
+  <nav class="pager small" aria-label="{{ t.wo_pages }}">
+    <span class="muted">{% tr "range_of" start=wo_page.start_index|intcomma end=wo_page.end_index|intcomma total=wo_page.paginator.count|intcomma %}</span>
     <span class="pager-links">
-      {% if wo_page.has_previous %}<a class="btn btn--sm" href="{% querystring wo_page=wo_page.previous_page_number %}#work-orders">‹ Sebelumnya</a>{% endif %}
-      <span>Hal. {{ wo_page.number }} / {{ wo_page.paginator.num_pages }}</span>
-      {% if wo_page.has_next %}<a class="btn btn--sm" href="{% querystring wo_page=wo_page.next_page_number %}#work-orders">Berikutnya ›</a>{% endif %}
+      {% if wo_page.has_previous %}<a class="btn btn--sm" href="{% querystring wo_page=wo_page.previous_page_number %}#work-orders">{{ t.previous }}</a>{% endif %}
+      <span>{% tr "page_of" n=wo_page.number total=wo_page.paginator.num_pages %}</span>
+      {% if wo_page.has_next %}<a class="btn btn--sm" href="{% querystring wo_page=wo_page.next_page_number %}#work-orders">{{ t.next }}</a>{% endif %}
     </span>
   </nav>
   {% endif %}
 </section>
-
-{% endblock %}
-
-{% block drawer %}
-<div class="drawer-backdrop" data-drawer-close hidden></div>
-<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
-  <div class="drawer-head">
-    <div>
-      <span class="muted small" data-field="kind">Detail</span>
-      <h2 id="drawer-title" class="mono" data-field="title"></h2>
-    </div>
-    <button type="button" class="icon-btn" data-drawer-close aria-label="Tutup">{% include "dashboard/_icon.html" with name="x" %}</button>
-  </div>
-  <dl class="drawer-meta" data-field="meta"></dl>
-  <div data-field="blocks"></div>
-</aside>
 {% endblock %}

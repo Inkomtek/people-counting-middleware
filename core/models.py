@@ -1,5 +1,6 @@
 import uuid
 
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
@@ -74,14 +75,23 @@ class DeviceList(models.Model):
 class SchedulerConfig(models.Model):
     """Singleton row holding the sync job settings editable from Admin."""
 
-    interval_minutes = models.PositiveIntegerField(default=1)
+    interval_seconds = models.PositiveIntegerField(
+        default=60,
+        validators=[MinValueValidator(10), MaxValueValidator(86400)],
+        help_text="How often the scheduler pulls new events from ZK (10-86400 seconds).",
+    )
     enabled = models.BooleanField(default=True)
+    dashboard_refresh_seconds = models.PositiveIntegerField(
+        default=60,
+        validators=[MinValueValidator(10), MaxValueValidator(3600)],
+        help_text="How often open dashboard pages reload their data (10-3600 seconds).",
+    )
 
     class Meta:
         verbose_name = "scheduler config"
 
     def __str__(self):
-        return f"Every {self.interval_minutes} minute(s)"
+        return f"Every {self.interval_seconds} second(s)"
 
     @classmethod
     def get(cls):

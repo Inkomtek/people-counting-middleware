@@ -76,7 +76,7 @@ class DeviceListAdmin(admin.ModelAdmin):
 
 @admin.register(SchedulerConfig)
 class SchedulerConfigAdmin(admin.ModelAdmin):
-    list_display = ("__str__", "interval_minutes", "enabled")
+    list_display = ("__str__", "interval_seconds", "enabled", "dashboard_refresh_seconds")
 
     def has_add_permission(self, request):
         return not SchedulerConfig.objects.exists()

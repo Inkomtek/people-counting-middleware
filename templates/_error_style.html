@@ -1,0 +1,15 @@
+<style>
+  :root { --bg: #f5f7fa; --surface: #fff; --ink: #0f1a2e; --muted: #5f6b7d; --accent: #1f4fd8; --border: #e3e8ef; color-scheme: light; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0b1220; --surface: #121b2d; --ink: #e8edf6; --muted: #93a0b5; --accent: #7ea3ff; --border: #24314a; color-scheme: dark; }
+    .btn { color: #0b1220 !important; }
+  }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; box-sizing: border-box;
+    background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .box { max-width: 480px; width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 40px 32px; text-align: center; }
+  .code { font-size: 56px; font-weight: 800; color: var(--accent); letter-spacing: -.02em; }
+  h1 { font-size: 22px; margin: 8px 0; }
+  p { margin: 0 0 8px; color: var(--muted); }
+  .en { font-size: 13px; }
+  .btn { display: inline-block; margin-top: 16px; padding: 10px 18px; border-radius: 12px; background: var(--accent); color: #fff; text-decoration: none; font-weight: 600; }
+</style>

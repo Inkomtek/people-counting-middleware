@@ -1,38 +1,27 @@
 """Read-only queries behind the public dashboard pages."""
 
-import json
 from datetime import datetime, time, timedelta
 
 from django.db.models import Avg, Count, Q
-from django.db.models.functions import ExtractHour, TruncDate
+from django.db.models.functions import ExtractHour, TruncDate, TruncMonth
 from django.utils import timezone
 
-from core.models import DeviceList, EventLog, NotificationLog
+from core.models import DeviceList, EventLog, NotificationLog, SensorLog
 from core.services import COUNTED_EVENT_TYPES, COUNTED_RECOGNITION_TARGET
 from washroom.models import SATISFACTION_TYPE, CustomerResponse, SensorReading
 
 RECAP_DAYS = 30
+RECAP_MONTHS = 12
+RECAP_DAILY = "daily"
+RECAP_MONTHLY = "monthly"
 SUCCESS = Q(response_status__startswith="2")
 # Same rule as core.services.is_countable, as a queryset filter.
 COUNTED_EVENTS = Q(event_type__in=COUNTED_EVENT_TYPES, recognition_target=COUNTED_RECOGNITION_TARGET)
-SECRET_KEYS = {"token", "client_secret", "access_token"}
 
 
 def day_bounds(day):
     start = timezone.make_aware(datetime.combine(day, time.min))
     return start, start + timedelta(days=1)
-
-
-def mask_secrets(value):
-    """Return a copy of a JSON value with token-like fields shortened to their first 7 characters."""
-    if isinstance(value, dict):
-        return {
-            key: (str(val)[:7] + "•••••" if key in SECRET_KEYS and val else mask_secrets(val))
-            for key, val in value.items()
-        }
-    if isinstance(value, list):
-        return [mask_secrets(item) for item in value]
-    return value
 
 
 def wo_number(log):
@@ -65,13 +54,24 @@ def kpis(devices, day):
     sent = notifications.count()
     success = notifications.filter(SUCCESS).count()
     return {
-        "people_in": EventLog.objects.filter(device__in=devices, time__gte=start, time__lt=end)
-        .filter(COUNTED_EVENTS).count(),
+        "people_in": visitors_in(devices, day),
         "counters": counters(devices),
         "wo_sent": sent,
         "wo_success": success,
         "wo_failed": sent - success,
     }
+
+
+def visitors_in(devices, day):
+    start, end = day_bounds(day)
+    return EventLog.objects.filter(device__in=devices, time__gte=start, time__lt=end).filter(COUNTED_EVENTS).count()
+
+
+def last_successful_sync(devices):
+    """Time of the newest successful ZK request for any of the devices, or None."""
+    log = (SensorLog.objects.filter(device__in=devices, status=SensorLog.STATUS_ONLINE)
+           .order_by("-time").first())
+    return log.time if log else None
 
 
 def module_summary(module, toilet, day):
@@ -127,8 +127,10 @@ def hourly(devices, day):
         .annotate(hour=ExtractHour("time", tzinfo=tz)).values_list("hour", flat=True)
     )
     peak = max(counts.values(), default=0)
+    busiest = min((hour for hour, n in counts.items() if n == peak), default=None) if peak else None
     return {
         "peak": peak,
+        "busiest_hour": busiest,
         "bars": [
             {
                 "hour": hour,
@@ -141,54 +143,56 @@ def hourly(devices, day):
     }
 
 
-def daily_recap(devices, until):
-    """One row per day with activity, newest first, for the RECAP_DAYS days up to `until`."""
-    since, end = day_bounds(until - timedelta(days=RECAP_DAYS - 1))[0], day_bounds(until)[1]
+def recap(devices, until, period=RECAP_DAILY):
+    """People in and Work Orders sent per day (last RECAP_DAYS days) or per month (last RECAP_MONTHS
+    months) up to `until`, newest first; only periods with activity are listed."""
+    if period == RECAP_MONTHLY:
+        first = until.replace(day=1)
+        for _ in range(RECAP_MONTHS - 1):
+            first = (first - timedelta(days=1)).replace(day=1)
+        trunc = TruncMonth
+    else:
+        first = until - timedelta(days=RECAP_DAYS - 1)
+        trunc = TruncDate
+    since, end = day_bounds(first)[0], day_bounds(until)[1]
+    tz = timezone.get_current_timezone()
+
     events = (
-        EventLog.objects.filter(device__in=devices, time__gte=since, time__lt=end)
-        .annotate(day=TruncDate("time")).values("day")
-        .annotate(total=Count("id"), people_in=Count("id", filter=COUNTED_EVENTS))
+        EventLog.objects.filter(device__in=devices, time__gte=since, time__lt=end).filter(COUNTED_EVENTS)
+        .annotate(period=trunc("time", tzinfo=tz)).values("period").annotate(n=Count("id"))
     )
     notifications = (
         NotificationLog.objects.filter(device__in=devices, time__gte=since, time__lt=end)
-        .annotate(day=TruncDate("time")).values("day")
-        .annotate(sent=Count("id"), success=Count("id", filter=SUCCESS))
+        .annotate(period=trunc("time", tzinfo=tz)).values("period").annotate(n=Count("id"))
     )
-    days = {}
+    rows = {}
     for row in events:
-        days.setdefault(row["day"], {}).update(total=row["total"], people_in=row["people_in"])
+        rows.setdefault(_as_date(row["period"]), {"people_in": 0, "sent": 0})["people_in"] = row["n"]
     for row in notifications:
-        days.setdefault(row["day"], {}).update(sent=row["sent"], success=row["success"])
-    rows = []
-    for day, values in sorted(days.items(), reverse=True):
-        row = {"day": day, "total": 0, "people_in": 0, "sent": 0, "success": 0, **values}
-        row["failed"] = row["sent"] - row["success"]
-        rows.append(row)
-    return rows
+        rows.setdefault(_as_date(row["period"]), {"people_in": 0, "sent": 0})["sent"] = row["n"]
+    return [{"period": key, **values} for key, values in sorted(rows.items(), reverse=True)]
 
 
-def work_orders(devices, query="", time_from=None, time_to=None):
+def _as_date(value):
+    # TruncMonth returns an aware datetime, TruncDate a date.
+    return timezone.localtime(value).date() if hasattr(value, "hour") else value
+
+
+STATUS_SUCCESS = "success"
+STATUS_FAILED = "failed"
+
+
+def work_orders(devices, status="", time_from=None, time_to=None):
     logs = NotificationLog.objects.filter(device__in=devices).select_related("device").order_by("-time")
     if time_from:
         logs = logs.filter(time__gte=time_from)
     if time_to:
         logs = logs.filter(time__lte=time_to)
-    if query:
-        logs = logs.filter(Q(response__wo_id__icontains=query) | Q(response_status__icontains=query))
+    if status == STATUS_SUCCESS:
+        logs = logs.filter(SUCCESS)
+    elif status == STATUS_FAILED:
+        logs = logs.exclude(SUCCESS)
     return logs
-
-
-def work_order_detail(log):
-    return json.dumps({
-        "wo": wo_number(log),
-        "time": timezone.localtime(log.time).strftime("%d %b %Y %H:%M:%S WIB"),
-        "device": f"{log.device.label} ({log.device_id})" if log.device.name else log.device_id,
-        "endpoint": log.endpoint_url,
-        "status": log.response_status,
-        "success": is_success(log),
-        "request": mask_secrets(log.body),
-        "response": mask_secrets(log.response),
-    }, ensure_ascii=False)
 
 
 def location_options():
