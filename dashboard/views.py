@@ -181,7 +181,8 @@ def people_counting(request, lang):
         recap_days=queries.RECAP_DAYS,
         recap_months=queries.RECAP_MONTHS,
         wo_page=wo_page,
-        wo_rows=[{"log": log, "success": queries.is_success(log)} for log in wo_page],
+        wo_rows=[{"log": log, "success": queries.is_success(log), "wo_number": queries.wo_number(log)}
+                 for log in wo_page],
         wo_status=wo_status, wo_from=wo_from, wo_to=wo_to,
     )
     return render(request, "dashboard/people_counting.html", ctx)

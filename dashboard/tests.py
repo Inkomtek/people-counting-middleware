@@ -95,7 +95,7 @@ class DashboardTests(TestCase):
         self.assertEqual([(c["current_count"], c["progress"]) for c in kpis["counters"]], [(8, 40)])
         self.assertEqual((kpis["wo_sent"], kpis["wo_success"], kpis["wo_failed"]), (2, 1, 1))
         self.assertNotIn("online", kpis)
-        self.assertNotContains(response, "WO-000128")
+        self.assertContains(response, "WO-000128")
         self.assertEqual(response.context["recap"][0]["people_in"], 2)
         self.assertEqual(response.context["recap"][0]["sent"], 2)
         self.assertNotContains(response, "Event Diterima")

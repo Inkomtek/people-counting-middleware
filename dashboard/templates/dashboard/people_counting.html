@@ -164,16 +164,17 @@
   </div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>{{ t.time }}</th><th>{{ t.device }}</th><th>{{ t.status }}</th></tr></thead>
+      <thead><tr><th>{{ t.time }}</th><th>{{ t.wo_number }}</th><th>{{ t.device }}</th><th>{{ t.status }}</th></tr></thead>
       <tbody>
         {% for row in wo_rows %}
         <tr>
           <td>{{ row.log.time|date:"H:i:s" }} WIB<br><span class="muted small">{{ row.log.time|date:"D, d M Y" }}</span></td>
+          <td class="mono">{{ row.wo_number }}</td>
           <td class="small">{{ row.log.device.label }}{% if row.log.device.name %}<br><span class="muted mono">{{ row.log.device_id }}</span>{% endif %}</td>
           <td>{% if row.success %}<span class="badge badge--ok"><i class="dot"></i>{{ t.success }}</span>{% else %}<span class="badge badge--bad"><i class="dot"></i>{{ t.failed }}</span>{% endif %}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="3" class="empty">{% if wo_status or wo_from or wo_to %}{{ t.no_wo_filtered }}{% else %}{{ t.no_wo }}{% endif %}</td></tr>
+        <tr><td colspan="4" class="empty">{% if wo_status or wo_from or wo_to %}{{ t.no_wo_filtered }}{% else %}{{ t.no_wo }}{% endif %}</td></tr>
         {% endfor %}
       </tbody>
     </table>
