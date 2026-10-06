@@ -1,10 +1,13 @@
 import random
+import uuid
 
 import requests
 from django.core.management.base import BaseCommand, CommandError
+from django.utils import timezone
 
 from core.models import DeviceList
-from washroom.models import PPM_TYPES, READING_TYPES, SATISFACTION_TYPE, ApiClient
+from washroom.models import PPM_TYPES, READING_TYPES, SATISFACTION_TYPE, ApiClient, StatusRule
+from washroom.services import evaluate_condition
 
 DUMMY_PREFIX = "DUMMY-"
 DUMMY_CLIENT = "dummy-tester"
@@ -21,7 +24,7 @@ RATINGS = {"normal": (4, 5), "warning": (3, 4), "critical": (1, 2)}
 class Command(BaseCommand):
     help = (
         "Test the washroom API end to end: register DUMMY-* devices on a toilet (building / floor / gender, "
-        "like the dashboard), then POST readings and ratings over HTTP like the ZK side would. "
+        "like the dashboard), then POST readings (in the sensor team's raw data format) and ratings over HTTP like they would. "
         "Use --cleanup to remove all dummy data."
     )
 
@@ -58,13 +61,14 @@ class Command(BaseCommand):
         self.stdout.write(f"Toilet : {toilet['building']} / lantai {toilet['floor']} / {toilet['gender']}")
         self.stdout.write(f"API    : {options['base_url']}/api/v1/  (key '{DUMMY_CLIENT}' regenerated)\n")
 
-        readings = [self.reading(t, toilet, options["scenario"]) for t in READING_TYPES]
+        rules = list(StatusRule.objects.all())
+        readings = [self.reading(t, toilet, options["scenario"], rules) for t in READING_TYPES]
         if ok := self.post(options["base_url"], api_key, "readings/", readings):
             for item in ok["data"]:
                 unit = "ppm" if item["type"] in PPM_TYPES else "%"
                 self.stdout.write(
-                    f"  {item['type']:<13} level {item['level']:>5}{unit:<4} battery {item['battery']:>3}%  "
-                    f"-> {item['condition'] or '-'} ({item['severity'] or '-'})"
+                    f"  {item['type']:<13} value {item['value']:>5}{unit:<4} battery {item['battery']:>3}%  "
+                    f"-> {item['status'] or '-'} ({item['severity'] or '-'})"
                 )
 
         ratings = [
@@ -97,16 +101,21 @@ class Command(BaseCommand):
     def device_id(device_type, toilet):
         return f"{DUMMY_PREFIX}{device_type.upper()}-{toilet['floor']}-{toilet['gender']}".replace(" ", "")
 
-    def reading(self, device_type, toilet, scenario):
+    def reading(self, device_type, toilet, scenario, rules):
+        """A reading as the sensor team sends it; they compute the status, here from our Status rules."""
         level_scenario = random.choice(list(SCENARIOS)) if scenario == "random" else scenario
         key = device_type if device_type in ("trash", "ammonia") else "dispenser"
         low, high = SCENARIOS[level_scenario][key]
-        level = round(random.uniform(low, high), 1) if device_type in PPM_TYPES else random.randint(low, high)
+        value = round(random.uniform(low, high), 1) if device_type in PPM_TYPES else random.randint(low, high)
+        now = timezone.now().isoformat(timespec="seconds")
         return {
-            "device_id": self.device_id(device_type, toilet),
-            "type": device_type,
+            "id": uuid.uuid4().hex[:12],
+            "inputDate": now,
+            "deviceId": self.device_id(device_type, toilet),
+            "value": value,
             "battery": random.randint(20, 100),
-            "level": level,
+            "lastOnline": now,
+            "status": evaluate_condition(device_type, value, rules)[0],
         }
 
     @staticmethod

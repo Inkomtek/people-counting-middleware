@@ -1,4 +1,4 @@
-"""Store readings and ratings sent by the ZK side."""
+"""Store readings and ratings sent by the sensor side."""
 
 from django.db import transaction
 
@@ -19,6 +19,15 @@ def evaluate_condition(sensor_type, level, rules=None):
     return "", ""
 
 
+def severity_for_status(sensor_type, status, rules):
+    """Severity of the StatusRule whose condition matches the sent status (case-insensitive), or ""."""
+    wanted = (status or "").strip().lower()
+    for rule in rules:
+        if rule.sensor_type == sensor_type and rule.condition.lower() == wanted:
+            return rule.severity
+    return ""
+
+
 def _get_device(device_id, device_type):
     """Only Admin-managed devices are allowed. Unknown device IDs are rejected earlier in validation."""
     device = DeviceList.objects.filter(id=device_id).first()
@@ -30,24 +39,38 @@ def _get_device(device_id, device_type):
 
 
 def store_readings(items, client):
-    """Save validated reading dicts. Returns the created readings."""
+    """Save validated readings in the sender's format.
+
+    A reading whose (deviceId, id) is already stored, or repeated in the same batch, is skipped, so the
+    sender can safely resend. Returns (stored, created_count): one reading per item, in order (the
+    existing one for a duplicate).
+    """
     rules = list(StatusRule.objects.all())
+    stored, created_count, seen = [], 0, {}
     with transaction.atomic():
-        created = []
         for item in items:
-            device = _get_device(item["device_id"], item["type"])
-            condition, severity = evaluate_condition(device.type, item.get("level"), rules)
-            created.append(SensorReading.objects.create(
-                device=device,
-                time=item["time"],
-                battery=item.get("battery"),
-                level=item.get("level"),
-                condition=condition,
-                severity=severity,
-                payload=item["payload"],
-                client=client,
-            ))
-    return created
+            device = item["device"]
+            key = (device.pk, item["id"])
+            reading = seen.get(key) or SensorReading.objects.filter(device=device, external_id=item["id"]).first()
+            if reading is None:
+                status = (item.get("status") or "").strip()
+                battery = item.get("battery")
+                reading = SensorReading.objects.create(
+                    device=device,
+                    external_id=item["id"],
+                    time=item["inputDate"],
+                    last_online=item.get("lastOnline"),
+                    battery=round(battery) if battery is not None else None,
+                    level=item.get("value"),
+                    condition=status,
+                    severity=severity_for_status(device.type, status, rules),
+                    payload=item["payload"],
+                    client=client,
+                )
+                created_count += 1
+            seen[key] = reading
+            stored.append(reading)
+    return stored, created_count
 
 
 def store_customer_responses(items, client):

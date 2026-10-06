@@ -66,8 +66,9 @@ LOCATION_PARAMETERS = [
 
 def _filter(queryset, params):
     """Filters shared by both list endpoints; location filters follow the dashboard's toilet fields."""
-    if params.get("device_id"):
-        queryset = queryset.filter(device_id=params["device_id"])
+    device_id = params.get("device_id") or params.get("deviceId")
+    if device_id:
+        queryset = queryset.filter(device_id=device_id)
     for field in ("building", "floor", "gender"):
         if params.get(field):
             queryset = queryset.filter(**{f"device__{field}": params[field]})
@@ -97,7 +98,8 @@ class ReadingListCreateView(generics.ListAPIView):
 
     @extend_schema(
         summary="List sensor readings (newest first)",
-        parameters=[*LOCATION_PARAMETERS, OpenApiParameter("type", str, enum=READING_TYPES)],
+        parameters=[*LOCATION_PARAMETERS, OpenApiParameter("deviceId", str, description="Same as device_id"),
+                    OpenApiParameter("type", str, enum=READING_TYPES)],
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
@@ -105,15 +107,19 @@ class ReadingListCreateView(generics.ListAPIView):
     @extend_schema(
         summary="Send sensor readings",
         description=(
-            "Send one reading as a JSON object, or up to 500 as a JSON list (all or nothing). `type` is the "
-            "device type used by the dashboard. `device_id` must already exist in Admin `DeviceList`; the API "
-            "rejects unknown or mismatched device IDs. The condition (Terisi, Hampir Habis, Habis, Penuh, ...) "
-            "is computed by the server from the Status rules in Admin."
+            "Raw data format of the sensor team (Washroom Dashboard Raw Data Documentation v1.0). Send one "
+            "reading as a JSON object, or up to 500 as a JSON list (all or nothing). `deviceId` must be "
+            "registered in Admin (Device list); its type there (soap, toilet-paper, tissue, trash, ammonia) is "
+            "the sensor type. `value` and `status` are stored as sent. `id` is unique per device: a reading "
+            "already stored is skipped (counted in `duplicates`), so resending is safe. 201 when at least one "
+            "reading is new, 200 when all were duplicates."
         ),
         request=ReadingInSerializer(many=True),
         responses={
-            201: inline_serializer("ReadingCreated", {
+            (201, "application/json"): inline_serializer("ReadingCreated", {
                 "status": serializers.CharField(default="success"),
+                "created": serializers.IntegerField(),
+                "duplicates": serializers.IntegerField(),
                 "data": ReadingOutSerializer(many=True),
             }),
             400: OpenApiResponse(ERROR_RESPONSE), 401: OpenApiResponse(ERROR_RESPONSE),
@@ -123,7 +129,13 @@ class ReadingListCreateView(generics.ListAPIView):
         items, many, error = _validate_batch(request, ReadingInSerializer)
         if error:
             return error
-        return _created(ReadingOutSerializer, store_readings(items, request.user), many)
+        stored, created = store_readings(items, request.user)
+        data = ReadingOutSerializer(stored, many=True).data
+        return Response(
+            {"status": "success", "created": created, "duplicates": len(stored) - created,
+             "data": data if many else data[0]},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
 
 class CustomerResponseListCreateView(generics.ListAPIView):

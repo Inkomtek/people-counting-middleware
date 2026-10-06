@@ -79,12 +79,17 @@ class StatusRule(models.Model):
 
 class SensorReading(models.Model):
     device = models.ForeignKey(DeviceList, on_delete=models.CASCADE, related_name="sensor_readings")
+    # The sender's own data id ("id" in the payload); unique per device, so a resent reading is skipped.
+    external_id = models.CharField(max_length=100, blank=True)
+    # "inputDate" in the payload.
     time = models.DateTimeField(db_index=True)
+    last_online = models.DateTimeField(null=True, blank=True)
     battery = models.IntegerField(
         null=True, blank=True, validators=[MinValueValidator(0), MaxValueValidator(100)]
     )
-    # Fill level in % (soap, toilet-paper, tissue, trash) or concentration in ppm (ammonia).
+    # "value" in the payload, stored as sent: % for soap, toilet-paper, tissue, trash; ppm for ammonia.
     level = models.FloatField(null=True, blank=True)
+    # "status" sent by the sensor side (e.g. "Terisi"); severity comes from a StatusRule with that name.
     condition = models.CharField(max_length=50, blank=True)
     severity = models.CharField(max_length=10, choices=Severity.choices, blank=True)
     payload = models.JSONField(default=dict, blank=True)
@@ -94,6 +99,12 @@ class SensorReading(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=["device", "-time"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["device", "external_id"], condition=~models.Q(external_id=""),
+                name="unique_reading_external_id_per_device",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.device_id} - {self.time}"

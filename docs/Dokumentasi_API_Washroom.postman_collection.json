@@ -34,10 +34,22 @@
             "url": {
               "raw": "{{baseUrl}}/api/v1/readings/?type=soap&building=GRAHA%20ISS%20BINTARO&floor=2&gender=male",
               "query": [
-                { "key": "type", "value": "soap" },
-                { "key": "building", "value": "GRAHA ISS BINTARO" },
-                { "key": "floor", "value": "2" },
-                { "key": "gender", "value": "male" }
+                {
+                  "key": "type",
+                  "value": "soap"
+                },
+                {
+                  "key": "building",
+                  "value": "GRAHA ISS BINTARO"
+                },
+                {
+                  "key": "floor",
+                  "value": "2"
+                },
+                {
+                  "key": "gender",
+                  "value": "male"
+                }
               ],
               "host": [
                 "{{baseUrl}}"
@@ -69,7 +81,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"device_id\": \"POSTMAN-SOAP-01\",\n  \"type\": \"soap\",\n  \"battery\": 92,\n  \"level\": 44\n}"
+              "raw": "{\n  \"id\": \"{{$timestamp}}\",\n  \"inputDate\": \"{{$isoTimestamp}}\",\n  \"deviceId\": \"POSTMAN-SOAP-01\",\n  \"value\": 45,\n  \"battery\": 90,\n  \"lastOnline\": \"{{$isoTimestamp}}\",\n  \"status\": \"Hampir Habis\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/readings/",
@@ -103,7 +115,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "[\n  {\n    \"device_id\": \"POSTMAN-SOAP-01\",\n    \"type\": \"soap\",\n    \"level\": 45,\n    \"battery\": 90\n  },\n  {\n    \"device_id\": \"POSTMAN-TOILET-PAPER-01\",\n    \"type\": \"toilet-paper\",\n    \"level\": 36,\n    \"battery\": 88\n  },\n  {\n    \"device_id\": \"POSTMAN-TISSUE-01\",\n    \"type\": \"tissue\",\n    \"level\": 28,\n    \"battery\": 80\n  },\n  {\n    \"device_id\": \"POSTMAN-TRASH-01\",\n    \"type\": \"trash\",\n    \"level\": 72,\n    \"battery\": 85\n  },\n  {\n    \"device_id\": \"POSTMAN-AMMONIA-01\",\n    \"type\": \"ammonia\",\n    \"level\": 12.5,\n    \"battery\": 91\n  }\n]"
+              "raw": "[\n  {\n    \"id\": \"{{$timestamp}}-0\",\n    \"inputDate\": \"{{$isoTimestamp}}\",\n    \"deviceId\": \"POSTMAN-SOAP-01\",\n    \"value\": 45,\n    \"battery\": 90,\n    \"lastOnline\": \"{{$isoTimestamp}}\",\n    \"status\": \"Hampir Habis\"\n  },\n  {\n    \"id\": \"{{$timestamp}}-1\",\n    \"inputDate\": \"{{$isoTimestamp}}\",\n    \"deviceId\": \"POSTMAN-TOILET-PAPER-01\",\n    \"value\": 36,\n    \"battery\": 88,\n    \"lastOnline\": \"{{$isoTimestamp}}\",\n    \"status\": \"Hampir Habis\"\n  },\n  {\n    \"id\": \"{{$timestamp}}-2\",\n    \"inputDate\": \"{{$isoTimestamp}}\",\n    \"deviceId\": \"POSTMAN-TISSUE-01\",\n    \"value\": 28,\n    \"battery\": 80,\n    \"lastOnline\": \"{{$isoTimestamp}}\",\n    \"status\": \"Hampir Habis\"\n  },\n  {\n    \"id\": \"{{$timestamp}}-3\",\n    \"inputDate\": \"{{$isoTimestamp}}\",\n    \"deviceId\": \"POSTMAN-TRASH-01\",\n    \"value\": 72,\n    \"battery\": 85,\n    \"lastOnline\": \"{{$isoTimestamp}}\",\n    \"status\": \"Hampir Penuh\"\n  },\n  {\n    \"id\": \"{{$timestamp}}-4\",\n    \"inputDate\": \"{{$isoTimestamp}}\",\n    \"deviceId\": \"POSTMAN-AMMONIA-01\",\n    \"value\": 12.5,\n    \"battery\": 91,\n    \"lastOnline\": \"{{$isoTimestamp}}\",\n    \"status\": \"Bau\"\n  }\n]"
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/readings/",
@@ -124,17 +136,31 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json", "type": "text" },
-              { "key": "X-API-Key", "value": "{{xApiKey}}", "type": "text" }
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{xApiKey}}",
+                "type": "text"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"device_id\": \"POSTMAN-TOILET-PAPER-01\",\n  \"type\": \"toilet-paper\",\n  \"battery\": 88,\n  \"level\": 36\n}"
+              "raw": "{\n  \"id\": \"{{$timestamp}}\",\n  \"inputDate\": \"{{$isoTimestamp}}\",\n  \"deviceId\": \"POSTMAN-TOILET-PAPER-01\",\n  \"value\": 36,\n  \"battery\": 88,\n  \"lastOnline\": \"{{$isoTimestamp}}\",\n  \"status\": \"Hampir Habis\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/readings/",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "readings"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "readings"
+              ]
             }
           },
           "response": []
@@ -144,17 +170,31 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json", "type": "text" },
-              { "key": "X-API-Key", "value": "{{xApiKey}}", "type": "text" }
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{xApiKey}}",
+                "type": "text"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"device_id\": \"POSTMAN-TRASH-01\",\n  \"type\": \"trash\",\n  \"battery\": 85,\n  \"level\": 72\n}"
+              "raw": "{\n  \"id\": \"{{$timestamp}}\",\n  \"inputDate\": \"{{$isoTimestamp}}\",\n  \"deviceId\": \"POSTMAN-TRASH-01\",\n  \"value\": 72,\n  \"battery\": 85,\n  \"lastOnline\": \"{{$isoTimestamp}}\",\n  \"status\": \"Hampir Penuh\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/readings/",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "readings"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "readings"
+              ]
             }
           },
           "response": []
@@ -164,17 +204,31 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json", "type": "text" },
-              { "key": "X-API-Key", "value": "{{xApiKey}}", "type": "text" }
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{xApiKey}}",
+                "type": "text"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"device_id\": \"POSTMAN-AMMONIA-01\",\n  \"type\": \"ammonia\",\n  \"battery\": 91,\n  \"level\": 12.5\n}"
+              "raw": "{\n  \"id\": \"{{$timestamp}}\",\n  \"inputDate\": \"{{$isoTimestamp}}\",\n  \"deviceId\": \"POSTMAN-AMMONIA-01\",\n  \"value\": 12.5,\n  \"battery\": 91,\n  \"lastOnline\": \"{{$isoTimestamp}}\",\n  \"status\": \"Bau\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/readings/",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "readings"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "readings"
+              ]
             }
           },
           "response": []
@@ -193,8 +247,14 @@
             "url": {
               "raw": "{{baseUrl}}/api/v1/customer-responses/?floor=2&gender=male",
               "query": [
-                { "key": "floor", "value": "2" },
-                { "key": "gender", "value": "male" }
+                {
+                  "key": "floor",
+                  "value": "2"
+                },
+                {
+                  "key": "gender",
+                  "value": "male"
+                }
               ],
               "host": [
                 "{{baseUrl}}"

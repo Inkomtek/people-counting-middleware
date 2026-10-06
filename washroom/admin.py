@@ -48,8 +48,9 @@ class ReadOnlyAdmin(admin.ModelAdmin):
 
 @admin.register(SensorReading)
 class SensorReadingAdmin(ReadOnlyAdmin):
-    list_display = ("time", "device", "battery", "level", "condition", "client")
+    list_display = ("time", "device", "external_id", "level", "battery", "condition", "last_online", "client")
     list_filter = ("device__type", "condition", "device__building", "device__floor", "device__gender", "device")
+    search_fields = ("external_id", "device__id", "device__name")
     date_hierarchy = "time"
     ordering = ("-time",)
 

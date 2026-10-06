@@ -3,40 +3,49 @@ from rest_framework import serializers
 
 from core.models import DeviceList
 
-from .models import PPM_TYPES, READING_TYPES, SATISFACTION_TYPE, CustomerResponse, SensorReading
+from .models import READING_TYPES, SATISFACTION_TYPE, CustomerResponse, SensorReading
 
 TIME_HELP = "ISO 8601. Without offset it is read as WIB. Default: time received."
 
 
-def check_device_type(device_id, expected_type):
-    """Reject unknown or mismatched device IDs; only Admin-managed devices are accepted."""
+def registered_device(device_id, allowed_types, field="device_id"):
+    """The Admin-registered device with that ID, if its type is one of `allowed_types`."""
     registered = DeviceList.objects.filter(pk=device_id).first()
     if not registered:
         raise serializers.ValidationError(
-            {"device_id": "Device ID tidak terdaftar di admin. Harap daftarkan device terlebih dahulu."}
+            {field: "Device ID tidak terdaftar di admin. Harap daftarkan device terlebih dahulu."}
         )
-
-    if registered.type != expected_type:
+    if registered.type not in allowed_types:
+        expected = " / ".join(allowed_types)
         raise serializers.ValidationError(
-            {"device_id": f"Device {device_id} terdaftar sebagai '{registered.type}', bukan '{expected_type}'."}
+            {field: f"Device {device_id} terdaftar sebagai '{registered.type}', bukan '{expected}'."}
         )
+    return registered
+
+
+def check_device_type(device_id, expected_type):
+    registered_device(device_id, [expected_type])
 
 
 class ReadingInSerializer(serializers.Serializer):
-    device_id = serializers.CharField(max_length=100)
-    type = serializers.ChoiceField(choices=[c for c in DeviceList.TYPE_CHOICES if c[0] in READING_TYPES])
-    time = serializers.DateTimeField(required=False, help_text=TIME_HELP)
-    battery = serializers.IntegerField(min_value=0, max_value=100, required=False, allow_null=True)
-    level = serializers.FloatField(
-        min_value=0, required=False, allow_null=True,
-        help_text="Fill level in % (soap, toilet-paper, tissue, trash) or concentration in ppm (ammonia).",
+    """One reading in the sensor team's raw data format (Washroom Dashboard Raw Data Documentation v1.0).
+
+    The sensor type is not in the payload: it is the `type` of the device registered in Admin.
+    """
+
+    id = serializers.CharField(max_length=100, help_text="The sender's data id, unique per device.")
+    inputDate = serializers.DateTimeField(help_text=TIME_HELP.replace(" Default: time received.", ""))
+    deviceId = serializers.CharField(max_length=100, help_text="Must be registered in Admin (Device list).")
+    value = serializers.FloatField(
+        required=False, allow_null=True,
+        help_text="Stored as sent: % for soap, toilet-paper, tissue, trash; ppm for ammonia.",
     )
+    battery = serializers.FloatField(min_value=0, max_value=100, required=False, allow_null=True)
+    lastOnline = serializers.DateTimeField(required=False, allow_null=True, help_text=TIME_HELP.split(".")[0])
+    status = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
 
     def validate(self, attrs):
-        if attrs["type"] not in PPM_TYPES and attrs.get("level") is not None and attrs["level"] > 100:
-            raise serializers.ValidationError({"level": "Level dalam persen, maksimal 100."})
-        check_device_type(attrs["device_id"], attrs["type"])
-        attrs.setdefault("time", timezone.now())
+        attrs["device"] = registered_device(attrs["deviceId"], READING_TYPES, field="deviceId")
         return attrs
 
 
@@ -59,13 +68,21 @@ class DeviceLocationMixin(serializers.Serializer):
 
 
 class ReadingOutSerializer(DeviceLocationMixin, serializers.ModelSerializer):
-    reading_id = serializers.IntegerField(source="id")
+    """A stored reading in the sender's field names, plus our id and the device's type and location."""
+
+    reading_id = serializers.IntegerField(source="pk")
+    id = serializers.CharField(source="external_id")
+    deviceId = serializers.CharField(source="device_id")
     type = serializers.CharField(source="device.type")
+    inputDate = serializers.DateTimeField(source="time")
+    value = serializers.FloatField(source="level", allow_null=True)
+    lastOnline = serializers.DateTimeField(source="last_online", allow_null=True)
+    status = serializers.CharField(source="condition")
 
     class Meta:
         model = SensorReading
-        fields = ("reading_id", "device_id", "type", "building", "floor", "gender",
-                  "time", "battery", "level", "condition", "severity")
+        fields = ("reading_id", "id", "deviceId", "type", "building", "floor", "gender",
+                  "inputDate", "value", "battery", "lastOnline", "status", "severity")
 
 
 class CustomerResponseOutSerializer(DeviceLocationMixin, serializers.ModelSerializer):

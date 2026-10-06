@@ -18,10 +18,10 @@ Semua request ke endpoint API memerlukan header berikut:
 
 Catatan penting:
 
-- Endpoint POST harus memakai trailing slash, misalnya `/api/v1/readings/` bukan `/api/v1/readings`
-- `device_id` WAJIB sudah terdaftar di Admin `DeviceList`.
-- API TIDAK BOLEH membuat device baru otomatis.
-- Jika `device_id` tidak ditemukan atau tipe device tidak cocok, server akan menolak dengan `400` dan pesan error yang jelas.
+- Data sensor (`/api/v1/readings/`) memakai format **Washroom Dashboard Raw Data Documentation v1.0** dari tim sensor: `id`, `inputDate`, `deviceId`, `value`, `battery`, `lastOnline`, `status`. Data dikirim setiap 30 menit.
+- Jenis sensor tidak dikirim di payload: jenisnya diambil dari tipe device (`deviceId`) yang didaftarkan di Admin `DeviceList`.
+- `deviceId` / `device_id` WAJIB sudah terdaftar di Admin `DeviceList`. API TIDAK membuat device baru otomatis; device yang tidak terdaftar atau tipenya tidak cocok ditolak dengan `400`.
+- URL boleh dengan atau tanpa garis miring di akhir (`/api/v1/readings/` atau `/api/v1/readings`).
 
 Nilai X-API-Key didapat dari admin Django, pada menu Washroom API > API client. Kunci yang dibuat akan ditampilkan sekali dan hanya hash-nya yang disimpan.
 
@@ -61,24 +61,24 @@ Response status:
 
 ## 2. Endpoint: GET /api/v1/readings/
 
-Digunakan untuk mengambil history data sensor.
+Digunakan untuk mengambil history data sensor. Field response memakai nama yang sama dengan payload, ditambah `reading_id` (ID di server), `type` dan lokasi device dari Admin.
 
 ### Query params
 
 - type: soap | toilet-paper | tissue | trash | ammonia
-- device_id: ID perangkat
+- deviceId (atau device_id): ID perangkat
 - building: contoh `GRAHA ISS BINTARO`
 - floor: contoh `2`
 - gender: male | female
-- time_from: ISO 8601, inclusive
+- time_from: ISO 8601, inclusive (berdasarkan `inputDate`)
 - time_to: ISO 8601, inclusive
 
 ### Contoh request
 
 ```http
-GET /api/v1/readings/?type=soap&device_id=POSTMAN-SOAP-01 HTTP/1.1
+GET /api/v1/readings/?type=soap&deviceId=POSTMAN-SOAP-01 HTTP/1.1
 Host: unpopular-unwieldy-tables.ngrok-free.dev
-X-API-Key: lt4lP2mgc65ktGoNCDtfQ65BkAp0V-HIedfU6RqAm8M
+X-API-Key: <API key>
 ```
 
 ### Contoh response
@@ -91,16 +91,18 @@ X-API-Key: lt4lP2mgc65ktGoNCDtfQ65BkAp0V-HIedfU6RqAm8M
   "results": [
     {
       "reading_id": 11,
-      "device_id": "POSTMAN-SOAP-01",
+      "id": "1",
+      "deviceId": "POSTMAN-SOAP-01",
       "type": "soap",
       "building": "GRAHA ISS BINTARO",
       "floor": "2",
       "gender": "male",
-      "time": "2026-10-03T08:14:00+07:00",
-      "battery": 90,
-      "level": 45.0,
-      "condition": "Hampir Habis",
-      "severity": "warning"
+      "inputDate": "2026-10-06T10:15:30+07:00",
+      "value": 60.0,
+      "battery": 81,
+      "lastOnline": "2026-10-06T10:15:30+07:00",
+      "status": "Terisi",
+      "severity": "normal"
     }
   ]
 }
@@ -110,87 +112,82 @@ X-API-Key: lt4lP2mgc65ktGoNCDtfQ65BkAp0V-HIedfU6RqAm8M
 
 ## 3. Endpoint: POST /api/v1/readings/
 
-Digunakan untuk mengirim satu data sensor atau batch maksimal 500 item.
+Digunakan tim sensor untuk mengirim data sensor (Amonia, Liquid Soap, Tissue Paper, Toilet Paper, Trash Level), satu object atau list maksimal 500 item, setiap 30 menit.
+
+### Field
+
+| Field | Tipe | Wajib | Keterangan |
+| --- | --- | --- | --- |
+| `id` | String | Ya | ID unik data, **unik per device**. Disimpan di server. |
+| `inputDate` | DateTime (ISO 8601) | Ya | Waktu data dicatat. Tanpa offset dibaca sebagai WIB; `Z` = UTC. |
+| `deviceId` | String | Ya | ID device, harus terdaftar di Admin `DeviceList`. Tipe device di Admin menentukan jenis sensor. |
+| `value` | Numeric | Tidak | Nilai bacaan sensor, disimpan apa adanya (% untuk soap/tissue/toilet paper/trash, ppm untuk amonia). |
+| `battery` | Numeric | Tidak | Sisa baterai 0-100 (%). |
+| `lastOnline` | DateTime (ISO 8601) | Tidak | Terakhir kali device online. |
+| `status` | String | Tidak | Kondisi menurut tim sensor (mis. `Terisi`), disimpan dan ditampilkan apa adanya di dashboard. |
 
 ### Payload satu object
 
 ```json
 {
-  "device_id": "POSTMAN-SOAP-01",
-  "type": "soap",
-  "battery": 90,
-  "level": 45
+  "id": "1",
+  "inputDate": "2026-08-19T10:15:30Z",
+  "deviceId": "POSTMAN-SOAP-01",
+  "value": 60,
+  "battery": 81,
+  "lastOnline": "2026-08-19T10:15:30Z",
+  "status": "Terisi"
 }
 ```
-
-> `device_id` harus sudah ada di Admin `DeviceList` dan tipe harus sesuai. Jika device belum terdaftar, request akan ditolak.
 
 ### Payload list (batch)
 
 ```json
 [
-  {
-    "device_id": "POSTMAN-SOAP-01",
-    "type": "soap",
-    "level": 45,
-    "battery": 90
-  },
-  {
-    "device_id": "POSTMAN-TOILET-PAPER-01",
-    "type": "toilet-paper",
-    "level": 36,
-    "battery": 88
-  },
-  {
-    "device_id": "POSTMAN-TISSUE-01",
-    "type": "tissue",
-    "level": 28,
-    "battery": 80
-  },
-  {
-    "device_id": "POSTMAN-TRASH-01",
-    "type": "trash",
-    "level": 72,
-    "battery": 85
-  },
-  {
-    "device_id": "POSTMAN-AMMONIA-01",
-    "type": "ammonia",
-    "level": 12.5,
-    "battery": 91
-  }
+  {"id": "101", "inputDate": "2026-10-06T10:00:00+07:00", "deviceId": "POSTMAN-SOAP-01",
+   "value": 45, "battery": 90, "lastOnline": "2026-10-06T10:00:00+07:00", "status": "Terisi"},
+  {"id": "102", "inputDate": "2026-10-06T10:00:00+07:00", "deviceId": "POSTMAN-TOILET-PAPER-01",
+   "value": 36, "battery": 88, "lastOnline": "2026-10-06T10:00:00+07:00", "status": "Terisi"},
+  {"id": "103", "inputDate": "2026-10-06T10:00:00+07:00", "deviceId": "POSTMAN-TISSUE-01",
+   "value": 28, "battery": 80, "lastOnline": "2026-10-06T10:00:00+07:00", "status": "Hampir Habis"},
+  {"id": "104", "inputDate": "2026-10-06T10:00:00+07:00", "deviceId": "POSTMAN-TRASH-01",
+   "value": 72, "battery": 85, "lastOnline": "2026-10-06T10:00:00+07:00", "status": "Hampir Penuh"},
+  {"id": "105", "inputDate": "2026-10-06T10:00:00+07:00", "deviceId": "POSTMAN-AMMONIA-01",
+   "value": 12.5, "battery": 91, "lastOnline": "2026-10-06T10:00:00+07:00", "status": "Bau"}
 ]
 ```
 
 ### Validasi
 
-- `device_id` wajib string
-- `device_id` harus sudah ada di Admin `DeviceList`; API TIDAK BOLEH auto-create device baru
-- `type` harus salah satu: `soap`, `toilet-paper`, `tissue`, `trash`, `ammonia`
-- `battery` 0-100 (opsional)
-- `level` 0-100 untuk type non-ammonia; ammonia dapat lebih dari 100 karena satuannya ppm
-- `time` bersifat opsional; jika tidak dikirim, server memakai waktu server saat request masuk
-- `time` tanpa offset akan dibaca sebagai WIB
-- Jika `device_id` ada tetapi tipe device-nya berbeda, request akan ditolak
+- `id`, `inputDate`, `deviceId` wajib
+- `deviceId` harus sudah ada di Admin `DeviceList` dengan tipe `soap`, `toilet-paper`, `tissue`, `trash` atau `ammonia`; device lain (people counter, satisfaction) ditolak
+- `battery` 0-100 (opsional); `value` dan `status` tidak dibatasi
+- **Data ganda:** jika `id` yang sama untuk `deviceId` yang sama sudah tersimpan, data tersebut dilewati (tidak disimpan ulang dan tidak error), jadi aman untuk mengirim ulang
 - Batch: semua item harus valid, jika satu item gagal maka seluruh batch ditolak
 
 ### Contoh response sukses
 
+HTTP `201` jika ada minimal satu data baru, `200` jika semua data sudah pernah tersimpan. `created` = jumlah data baru, `duplicates` = jumlah data yang dilewati. Untuk batch, `data` berupa list sesuai urutan payload.
+
 ```json
 {
   "status": "success",
+  "created": 1,
+  "duplicates": 0,
   "data": {
     "reading_id": 11,
-    "device_id": "POSTMAN-SOAP-01",
+    "id": "1",
+    "deviceId": "POSTMAN-SOAP-01",
     "type": "soap",
     "building": "GRAHA ISS BINTARO",
     "floor": "2",
     "gender": "male",
-    "time": "2026-10-03T08:14:00+07:00",
-    "battery": 90,
-    "level": 45,
-    "condition": "Hampir Habis",
-    "severity": "warning"
+    "inputDate": "2026-08-19T17:15:30+07:00",
+    "value": 60.0,
+    "battery": 81,
+    "lastOnline": "2026-08-19T17:15:30+07:00",
+    "status": "Terisi",
+    "severity": "normal"
   }
 }
 ```
@@ -205,7 +202,7 @@ Digunakan untuk mengirim satu data sensor atau batch maksimal 500 item.
     {
       "index": 1,
       "errors": {
-        "device_id": ["This field is required."]
+        "deviceId": ["Device ID tidak terdaftar di admin. Harap daftarkan device terlebih dahulu."]
       }
     }
   ]
@@ -320,32 +317,11 @@ Digunakan untuk mengirim rating pelanggan (skala 1-5) dari tombol feedback.
 
 ---
 
-## 6. Status rule / kondisi perangkat
+## 6. Status dan severity
 
-Server menghitung condition berdasarkan status rule yang terdapat di admin.
+`status` yang ditampilkan di dashboard adalah `status` yang dikirim tim sensor, apa adanya.
 
-Contoh kondisi:
-
-- `soap`: `Terisi`, `Hampir Habis`, `Habis`
-- `trash`: `Normal`, `Penuh`
-- `ammonia`: `Normal`, `Bahaya`
-
-Setiap rule mempunyai:
-
-- `min_level` inklusif
-- `max_level` eksklusif
-
-Artinya kondisi terpilih adalah rule dengan range yang memenuhi:
-
-```text
-min_level <= level < max_level
-```
-
-Severity:
-
-- normal
-- warning
-- critical
+`severity` (`normal` / `warning` / `critical`) diisi server bila `status` sama dengan nama kondisi di Admin **Status rules** untuk jenis sensor tersebut (tidak membedakan huruf besar/kecil), misalnya `Terisi` → `normal`, `Habis` → `critical`. Jika tidak ada yang cocok, `severity` kosong.
 
 ---
 
@@ -367,10 +343,13 @@ curl -X POST https://unpopular-unwieldy-tables.ngrok-free.dev/api/v1/readings/ \
   -H "Content-Type: application/json" \
   -H "X-API-Key: lt4lP2mgc65ktGoNCDtfQ65BkAp0V-HIedfU6RqAm8M" \
   -d '{
-    "device_id": "POSTMAN-SOAP-01",
-    "type": "soap",
-    "battery": 92,
-    "level": 44
+    "id": "1",
+    "inputDate": "2026-10-06T10:15:30+07:00",
+    "deviceId": "POSTMAN-SOAP-01",
+    "value": 60,
+    "battery": 81,
+    "lastOnline": "2026-10-06T10:15:30+07:00",
+    "status": "Terisi"
   }'
 ```
 
@@ -392,8 +371,9 @@ curl -X POST http://192.168.10.120:8080/api/v1/customer-responses/ \
 ## 9. Catatan penting untuk testing Postman
 
 - Gunakan header `X-API-Key` dan bukan `Authorization`
-- `device_id` harus sudah terdaftar di Admin `DeviceList` sebelum mengirim data
-- Jika `device_id` tidak terdaftar atau tipenya tidak cocok dengan payload, server menolak request dengan HTTP 400
+- `deviceId` / `device_id` harus sudah terdaftar di Admin `DeviceList` (dengan tipe sensor yang benar) sebelum mengirim data
+- Jika device tidak terdaftar atau tipenya tidak cocok, server menolak request dengan HTTP 400
+- Untuk mengulang test data sensor, ganti `id`; `id` yang sama untuk device yang sama dilewati sebagai duplikat
 - Untuk testing lokal, gunakan IP server berikut:
   - http://192.168.10.120:8080
 - Jika Anda ingin test dummy work order bukan washroom API, gunakan:
@@ -405,10 +385,13 @@ curl -X POST http://192.168.10.120:8080/api/v1/customer-responses/ \
 
 ```json
 {
-  "device_id": "POSTMAN-SOAP-01",
-  "type": "soap",
+  "id": "2001",
+  "inputDate": "2026-10-06T10:30:00+07:00",
+  "deviceId": "POSTMAN-SOAP-01",
+  "value": 33,
   "battery": 89,
-  "level": 33
+  "lastOnline": "2026-10-06T10:30:00+07:00",
+  "status": "Hampir Habis"
 }
 ```
 
