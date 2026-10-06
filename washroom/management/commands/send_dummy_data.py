@@ -5,7 +5,7 @@ import requests
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from core.models import DeviceList
+from core.models import DeviceList, Scope
 from washroom.models import PPM_TYPES, READING_TYPES, SATISFACTION_TYPE, ApiClient, StatusRule
 from washroom.services import evaluate_condition
 
@@ -23,13 +23,18 @@ RATINGS = {"normal": (4, 5), "warning": (3, 4), "critical": (1, 2)}
 
 class Command(BaseCommand):
     help = (
-        "Test the washroom API end to end: register DUMMY-* devices on a toilet (building / floor / gender, "
+        "Test the washroom API end to end: register DUMMY-* devices on a toilet (a Scope, like the dashboard; "
+        "or building / floor / gender, "
         "like the dashboard), then POST readings (in the sensor team's raw data format) and ratings over HTTP like they would. "
         "Use --cleanup to remove all dummy data."
     )
 
     def add_arguments(self, parser):
         parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="Server running the API")
+        parser.add_argument(
+            "--scope", type=int,
+            help="Scope id of the toilet. Default: the Scope of the first people counter that has one",
+        )
         parser.add_argument("--building", help="Default: the toilet of the first located people counter")
         parser.add_argument("--floor")
         parser.add_argument("--gender", choices=[value for value, _ in DeviceList.GENDER_CHOICES])
@@ -58,7 +63,8 @@ class Command(BaseCommand):
                 defaults={"type": device_type, "name": f"Dummy {device_type}", **toilet},
             )
 
-        self.stdout.write(f"Toilet : {toilet['building']} / lantai {toilet['floor']} / {toilet['gender']}")
+        self.stdout.write(f"Toilet : {toilet['scope'] or ''} "
+                          f"({toilet['building'] or '-'} / lantai {toilet['floor'] or '-'} / {toilet['gender'] or '-'})")
         self.stdout.write(f"API    : {options['base_url']}/api/v1/  (key '{DUMMY_CLIENT}' regenerated)\n")
 
         rules = list(StatusRule.objects.all())
@@ -85,20 +91,31 @@ class Command(BaseCommand):
         self.stdout.write("Remove the dummy data later with: python manage.py send_dummy_data --cleanup")
 
     def toilet(self, options):
-        anchor = (
-            DeviceList.objects.filter(type=DeviceList.TYPE_PEOPLE).exclude(building="").order_by("id").first()
-        )
+        """The DeviceList location fields for the dummy devices: a Scope (what the dashboard filters by)
+        and/or building / floor / gender, taken from the first located people counter by default."""
+        people = DeviceList.objects.filter(type=DeviceList.TYPE_PEOPLE).order_by("id")
+        if options["scope"]:
+            scope = Scope.objects.filter(pk=options["scope"]).first()
+            if scope is None:
+                raise CommandError(f"Scope {options['scope']} does not exist.")
+            anchor = people.filter(scope=scope).first()
+        else:
+            anchor = people.exclude(scope=None).first() or people.exclude(building="").first()
+            scope = anchor.scope if anchor else None
         toilet = {
+            "scope": scope,
             "building": options["building"] or (anchor.building if anchor else ""),
             "floor": options["floor"] or (anchor.floor if anchor else ""),
             "gender": options["gender"] or (anchor.gender if anchor else ""),
         }
-        if not all(toilet.values()):
-            raise CommandError("No toilet location found. Pass --building, --floor and --gender.")
+        if scope is None and not all(toilet[field] for field in ("building", "floor", "gender")):
+            raise CommandError("No toilet location found. Pass --scope, or --building, --floor and --gender.")
         return toilet
 
     @staticmethod
     def device_id(device_type, toilet):
+        if toilet["scope"]:
+            return f"{DUMMY_PREFIX}{device_type.upper()}-S{toilet['scope'].pk}"
         return f"{DUMMY_PREFIX}{device_type.upper()}-{toilet['floor']}-{toilet['gender']}".replace(" ", "")
 
     def reading(self, device_type, toilet, scenario, rules):

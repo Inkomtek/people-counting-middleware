@@ -16,6 +16,8 @@ from .serializers import (
 from .services import store_customer_responses, store_readings
 
 MAX_BATCH = 500
+# Everything the output serializers read about a device, including its location hierarchy.
+DEVICE_RELATED = ("device__scope__area__site__client", "device__scope__area__site__region")
 
 ERROR_RESPONSE = inline_serializer(
     "ErrorResponse",
@@ -59,6 +61,7 @@ LOCATION_PARAMETERS = [
     OpenApiParameter("building", str, description='e.g. "GRAHA ISS BINTARO"'),
     OpenApiParameter("floor", str, description='e.g. "2"'),
     OpenApiParameter("gender", str, enum=[value for value, _ in DeviceList.GENDER_CHOICES]),
+    OpenApiParameter("scope", int, description="Scope id (one toilet in the Client / Region / Site / Area / Scope hierarchy)"),
     OpenApiParameter("time_from", str, description="ISO 8601, inclusive"),
     OpenApiParameter("time_to", str, description="ISO 8601, inclusive"),
 ]
@@ -72,6 +75,8 @@ def _filter(queryset, params):
     for field in ("building", "floor", "gender"):
         if params.get(field):
             queryset = queryset.filter(**{f"device__{field}": params[field]})
+    if (params.get("scope") or "").isdigit():
+        queryset = queryset.filter(device__scope_id=params["scope"])
     if parse_datetime(params.get("time_from") or ""):
         queryset = queryset.filter(time__gte=parse_datetime(params["time_from"]))
     if parse_datetime(params.get("time_to") or ""):
@@ -91,7 +96,7 @@ class ReadingListCreateView(generics.ListAPIView):
     serializer_class = ReadingOutSerializer
 
     def get_queryset(self):
-        queryset = _filter(SensorReading.objects.select_related("device"), self.request.query_params)
+        queryset = _filter(SensorReading.objects.select_related(*DEVICE_RELATED), self.request.query_params)
         if self.request.query_params.get("type"):
             queryset = queryset.filter(device__type=self.request.query_params["type"])
         return queryset.order_by("-time", "-id")
@@ -145,7 +150,7 @@ class CustomerResponseListCreateView(generics.ListAPIView):
     serializer_class = CustomerResponseOutSerializer
 
     def get_queryset(self):
-        queryset = CustomerResponse.objects.select_related("device")
+        queryset = CustomerResponse.objects.select_related(*DEVICE_RELATED)
         return _filter(queryset, self.request.query_params).order_by("-time", "-id")
 
     @extend_schema(summary="List customer responses (newest first)", parameters=LOCATION_PARAMETERS)

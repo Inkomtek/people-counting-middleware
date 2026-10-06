@@ -49,7 +49,8 @@ class ReadOnlyAdmin(admin.ModelAdmin):
 @admin.register(SensorReading)
 class SensorReadingAdmin(ReadOnlyAdmin):
     list_display = ("time", "device", "external_id", "level", "battery", "condition", "last_online", "client")
-    list_filter = ("device__type", "condition", "device__building", "device__floor", "device__gender", "device")
+    list_filter = ("device__type", "condition", "device__scope__area__site__client", "device__scope__area__site",
+                   "device__scope", "device__building", "device__floor", "device__gender", "device")
     search_fields = ("external_id", "device__id", "device__name")
     date_hierarchy = "time"
     ordering = ("-time",)
@@ -58,6 +59,7 @@ class SensorReadingAdmin(ReadOnlyAdmin):
 @admin.register(CustomerResponse)
 class CustomerResponseAdmin(ReadOnlyAdmin):
     list_display = ("time", "device", "rating", "comment", "client")
-    list_filter = ("rating", "device__building", "device__floor", "device__gender", "device")
+    list_filter = ("rating", "device__scope__area__site__client", "device__scope__area__site", "device__scope",
+                   "device__building", "device__floor", "device__gender", "device")
     date_hierarchy = "time"
     ordering = ("-time",)

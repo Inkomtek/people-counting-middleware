@@ -6,7 +6,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
 
-from core.models import DeviceList
+from core.models import Area, Client, DeviceList, Region, Scope, Site
 
 from .models import ApiClient, CustomerResponse, SensorReading
 from .services import evaluate_condition
@@ -15,6 +15,12 @@ READINGS_URL = "/api/v1/readings/"
 RESPONSES_URL = "/api/v1/customer-responses/"
 # The seeded ZK people counter's toilet (core/0007).
 TOILET = {"building": "GRAHA ISS BINTARO", "floor": "2", "gender": "male"}
+
+
+def make_scope(name="Floor 2 - Toilet Pria"):
+    site = Site.objects.create(client=Client.objects.get_or_create(name="ISS")[0],
+                               region=Region.objects.get_or_create(name="Banten")[0], name="Bintaro")
+    return Scope.objects.create(area=Area.objects.create(site=site, name="Graha ISS"), name=name)
 
 
 class ApiTestCase(TestCase):
@@ -185,6 +191,19 @@ class ReadingTests(ApiTestCase):
         self.assertEqual([r["deviceId"] for r in response.json()["results"]], ["A"])
         self.assertEqual(len(self.get(READINGS_URL, {"deviceId": "C"}).json()["results"]), 1)
 
+    def test_location_hierarchy_in_output_and_scope_filter(self):
+        scope = make_scope()
+        DeviceList.objects.create(id="A", type="soap", scope=scope)
+        DeviceList.objects.create(id="B", type="soap")
+        response = self.post(READINGS_URL, [raw("A", value=1), raw("B", value=1)])
+        self.assertEqual([r["location"] for r in response.json()["data"]], [
+            {"client": "ISS", "region": "Banten", "site": "Bintaro", "area": "Graha ISS",
+             "scope": "Floor 2 - Toilet Pria", "scope_id": scope.pk},
+            None,
+        ])
+        results = self.get(READINGS_URL, {"scope": scope.pk}).json()["results"]
+        self.assertEqual([(r["deviceId"], r["location"]["scope_id"]) for r in results], [("A", scope.pk)])
+
     def test_non_object_body_rejected(self):
         self.assertEqual(self.post(READINGS_URL, [1, 2]).status_code, 400)
         self.assertEqual(self.post(READINGS_URL, []).status_code, 400)
@@ -272,6 +291,19 @@ class SendDummyDataCommandTests(TestCase):
         self.assertFalse(devices.exclude(**TOILET).exists())
         self.assertEqual(set(SensorReading.objects.values_list("severity", flat=True)), {"critical"})
         self.assertEqual(CustomerResponse.objects.count(), 3)
+
+    def test_uses_the_people_counter_scope(self):
+        scope = make_scope()
+        DeviceList.objects.filter(type="people").update(scope=scope)
+        self.assertEqual(self.run_command("--ratings", "1").count("HTTP 201"), 2)
+        devices = DeviceList.objects.filter(id__startswith="DUMMY-")
+        self.assertEqual(devices.count(), 6)
+        self.assertFalse(devices.exclude(scope=scope).exists())
+        self.assertTrue(devices.filter(id=f"DUMMY-SOAP-S{scope.pk}").exists())
+
+    def test_unknown_scope_is_an_error(self):
+        with self.assertRaises(CommandError):
+            self.run_command("--scope", "999")
 
     def test_cleanup_removes_dummy_data_only(self):
         DeviceList.objects.create(id="REAL-1", type="soap")

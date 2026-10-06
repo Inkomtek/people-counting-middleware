@@ -65,6 +65,17 @@ class DeviceLocationMixin(serializers.Serializer):
     building = serializers.CharField(source="device.building", read_only=True)
     floor = serializers.CharField(source="device.floor", read_only=True)
     gender = serializers.CharField(source="device.gender", read_only=True)
+    location = serializers.SerializerMethodField(
+        help_text="The device's Client / Region / Site / Area / Scope (names, scope_id), or null when no Scope is set."
+    )
+
+    def get_location(self, obj) -> dict | None:
+        scope = obj.device.scope
+        if scope is None:
+            return None
+        site = scope.area.site
+        return {"client": site.client.name, "region": site.region.name, "site": site.name,
+                "area": scope.area.name, "scope": scope.name, "scope_id": scope.pk}
 
 
 class ReadingOutSerializer(DeviceLocationMixin, serializers.ModelSerializer):
@@ -82,7 +93,7 @@ class ReadingOutSerializer(DeviceLocationMixin, serializers.ModelSerializer):
     class Meta:
         model = SensorReading
         fields = ("reading_id", "id", "deviceId", "type", "building", "floor", "gender",
-                  "inputDate", "value", "battery", "lastOnline", "status", "severity")
+                  "location", "inputDate", "value", "battery", "lastOnline", "status", "severity")
 
 
 class CustomerResponseOutSerializer(DeviceLocationMixin, serializers.ModelSerializer):
@@ -90,4 +101,4 @@ class CustomerResponseOutSerializer(DeviceLocationMixin, serializers.ModelSerial
 
     class Meta:
         model = CustomerResponse
-        fields = ("response_id", "device_id", "building", "floor", "gender", "time", "rating", "comment")
+        fields = ("response_id", "device_id", "building", "floor", "gender", "location", "time", "rating", "comment")

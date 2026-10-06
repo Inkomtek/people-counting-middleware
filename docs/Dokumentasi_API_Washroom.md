@@ -20,6 +20,7 @@ Catatan penting:
 
 - Data sensor (`/api/v1/readings/`) memakai format **Washroom Dashboard Raw Data Documentation v1.0** dari tim sensor: `id`, `inputDate`, `deviceId`, `value`, `battery`, `lastOnline`, `status`. Data dikirim setiap 30 menit.
 - Jenis sensor tidak dikirim di payload: jenisnya diambil dari tipe device (`deviceId`) yang didaftarkan di Admin `DeviceList`.
+- Lokasi device di dashboard mengikuti hierarki **Client → Region → Site → Area → Scope** (satu Scope = satu toilet) yang diatur di Admin. Response API menyertakan lokasi ini di field `location` (`null` jika device belum dipasangkan ke Scope). Field `building` / `floor` / `gender` masih dikirim untuk kompatibilitas.
 - `deviceId` / `device_id` WAJIB sudah terdaftar di Admin `DeviceList`. API TIDAK membuat device baru otomatis; device yang tidak terdaftar atau tipenya tidak cocok ditolak dengan `400`.
 - URL boleh dengan atau tanpa garis miring di akhir (`/api/v1/readings/` atau `/api/v1/readings`).
 
@@ -70,6 +71,7 @@ Digunakan untuk mengambil history data sensor. Field response memakai nama yang 
 - building: contoh `GRAHA ISS BINTARO`
 - floor: contoh `2`
 - gender: male | female
+- scope: ID Scope (toilet) di hierarki lokasi
 - time_from: ISO 8601, inclusive (berdasarkan `inputDate`)
 - time_to: ISO 8601, inclusive
 
@@ -97,6 +99,10 @@ X-API-Key: <API key>
       "building": "GRAHA ISS BINTARO",
       "floor": "2",
       "gender": "male",
+      "location": {
+        "client": "ISS", "region": "Banten", "site": "Bintaro", "area": "Graha ISS",
+        "scope": "Floor 2 - Toilet Pria", "scope_id": 1
+      },
       "inputDate": "2026-10-06T10:15:30+07:00",
       "value": 60.0,
       "battery": 81,
@@ -182,6 +188,10 @@ HTTP `201` jika ada minimal satu data baru, `200` jika semua data sudah pernah t
     "building": "GRAHA ISS BINTARO",
     "floor": "2",
     "gender": "male",
+    "location": {
+      "client": "ISS", "region": "Banten", "site": "Bintaro", "area": "Graha ISS",
+      "scope": "Floor 2 - Toilet Pria", "scope_id": 1
+    },
     "inputDate": "2026-08-19T17:15:30+07:00",
     "value": 60.0,
     "battery": 81,
@@ -221,6 +231,7 @@ Digunakan untuk mengambil history rating pelanggan.
 - building
 - floor
 - gender
+- scope: ID Scope (toilet)
 - time_from
 - time_to
 
