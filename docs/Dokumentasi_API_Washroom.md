@@ -8,13 +8,13 @@ Dokumen ini menjelaskan endpoint API yang dipakai untuk mengirim data sensor toi
 
 Base URL server saat ini:
 
-- https://unpopular-unwieldy-tables.ngrok-free.dev
+- http://202.157.177.157:8080
 
 Semua request ke endpoint API memerlukan header berikut:
 
-- X-API-Key: lt4lP2mgc65ktGoNCDtfQ65BkAp0V-HIedfU6RqAm8M
+- X-API-Key: `<API key>`
 
-> Demo key aktif untuk collection Postman: `lt4lP2mgc65ktGoNCDtfQ65BkAp0V-HIedfU6RqAm8M`
+> API key diberikan terpisah oleh tim kami melalui jalur aman. Jangan membagikan key ini; hubungi kami bila key bocor agar diganti.
 
 Catatan penting:
 
@@ -24,7 +24,7 @@ Catatan penting:
 - `deviceId` / `device_id` WAJIB sudah terdaftar di Admin `DeviceList`. API TIDAK membuat device baru otomatis; device yang tidak terdaftar atau tipenya tidak cocok ditolak dengan `400`.
 - URL boleh dengan atau tanpa garis miring di akhir (`/api/v1/readings/` atau `/api/v1/readings`).
 
-Nilai X-API-Key didapat dari admin Django, pada menu Washroom API > API client. Kunci yang dibuat akan ditampilkan sekali dan hanya hash-nya yang disimpan.
+Server hanya menyimpan hash dari API key, sehingga key tidak dapat ditampilkan ulang. Jika key hilang, minta key baru ke tim kami (key lama otomatis tidak berlaku).
 
 Device uji untuk Postman sudah terdaftar di Admin `DeviceList` dengan lokasi `GRAHA ISS BINTARO`, lantai `2`, gender `male`:
 
@@ -79,7 +79,7 @@ Digunakan untuk mengambil history data sensor. Field response memakai nama yang 
 
 ```http
 GET /api/v1/readings/?type=soap&deviceId=POSTMAN-SOAP-01 HTTP/1.1
-Host: unpopular-unwieldy-tables.ngrok-free.dev
+Host: 202.157.177.157:8080
 X-API-Key: <API key>
 ```
 
@@ -239,8 +239,8 @@ Digunakan untuk mengambil history rating pelanggan.
 
 ```http
 GET /api/v1/customer-responses/?device_id=POSTMAN-FEEDBACK-01 HTTP/1.1
-Host: unpopular-unwieldy-tables.ngrok-free.dev
-X-API-Key: lt4lP2mgc65ktGoNCDtfQ65BkAp0V-HIedfU6RqAm8M
+Host: 202.157.177.157:8080
+X-API-Key: <API key>
 ```
 
 ### Contoh response
@@ -340,8 +340,8 @@ Digunakan untuk mengirim rating pelanggan (skala 1-5) dari tombol feedback.
 
 Server menyediakan dokumentasi OpenAPI secara public tanpa login.
 
-- Swagger UI: https://unpopular-unwieldy-tables.ngrok-free.dev/api/docs/
-- Schema YAML: https://unpopular-unwieldy-tables.ngrok-free.dev/api/schema/
+- Swagger UI: http://202.157.177.157:8080/api/docs/
+- Schema YAML: http://202.157.177.157:8080/api/schema/
 
 ---
 
@@ -350,9 +350,9 @@ Server menyediakan dokumentasi OpenAPI secara public tanpa login.
 ### POST reading
 
 ```bash
-curl -X POST https://unpopular-unwieldy-tables.ngrok-free.dev/api/v1/readings/ \
+curl -X POST http://202.157.177.157:8080/api/v1/readings/ \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: lt4lP2mgc65ktGoNCDtfQ65BkAp0V-HIedfU6RqAm8M" \
+  -H "X-API-Key: <API key>" \
   -d '{
     "id": "1",
     "inputDate": "2026-10-06T10:15:30+07:00",
@@ -367,9 +367,9 @@ curl -X POST https://unpopular-unwieldy-tables.ngrok-free.dev/api/v1/readings/ \
 ### POST rating
 
 ```bash
-curl -X POST http://192.168.10.120:8080/api/v1/customer-responses/ \
+curl -X POST http://202.157.177.157:8080/api/v1/customer-responses/ \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: lt4lP2mgc65ktGoNCDtfQ65BkAp0V-HIedfU6RqAm8M" \
+  -H "X-API-Key: <API key>" \
   -d '{
     "device_id": "POSTMAN-FEEDBACK-01",
     "rating": 5,
@@ -385,10 +385,6 @@ curl -X POST http://192.168.10.120:8080/api/v1/customer-responses/ \
 - `deviceId` / `device_id` harus sudah terdaftar di Admin `DeviceList` (dengan tipe sensor yang benar) sebelum mengirim data
 - Jika device tidak terdaftar atau tipenya tidak cocok, server menolak request dengan HTTP 400
 - Untuk mengulang test data sensor, ganti `id`; `id` yang sama untuk device yang sama dilewati sebagai duplikat
-- Untuk testing lokal, gunakan IP server berikut:
-  - http://192.168.10.120:8080
-- Jika Anda ingin test dummy work order bukan washroom API, gunakan:
-  - http://192.168.10.120:8080/dummy/api_iot.php
 
 ---
 

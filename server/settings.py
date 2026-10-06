@@ -177,7 +177,7 @@ SPECTACULAR_SETTINGS = {
     "TITLE": "Washroom API",
     "DESCRIPTION": "Endpoints for external systems to send washroom sensor data and read the dashboard snapshot.",
     "VERSION": "1.0.0",
-    "SERVERS": [{"url": API_BASE_URL, "description": "Dev server"}],
+    "SERVERS": [{"url": API_BASE_URL, "description": "API server"}],
     "SERVE_INCLUDE_SCHEMA": False,
     # The docs page itself is public; every API call still needs X-API-Key.
     "SERVE_PERMISSIONS": ["rest_framework.permissions.AllowAny"],

@@ -1,18 +1,18 @@
 {
   "info": {
     "name": "Washroom API",
-    "description": "Collection folder for testing the Washroom API on https://unpopular-unwieldy-tables.ngrok-free.dev. Update the xApiKey variable before running the requests. Note: device_id must already exist in Admin; the API does not auto-create devices.",
+    "description": "Collection folder for testing the Washroom API on http://202.157.177.157:8080. Update the xApiKey variable before running the requests. Note: device_id must already exist in Admin; the API does not auto-create devices.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
-      "value": "https://unpopular-unwieldy-tables.ngrok-free.dev",
+      "value": "http://202.157.177.157:8080",
       "type": "string"
     },
     {
       "key": "xApiKey",
-      "value": "lt4lP2mgc65ktGoNCDtfQ65BkAp0V-HIedfU6RqAm8M",
+      "value": "<API key>",
       "type": "string"
     }
   ],
