@@ -409,3 +409,61 @@ class WorkOrderOutcomeTests(TestCase):
         )
         self.assertFalse(failed.success)
 
+
+class SeedLocationsCommandTests(TestCase):
+    def run_command(self, *args):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command("seed_locations", *args, stdout=out)
+        return out.getvalue()
+
+    def test_loads_real_locations_and_assigns_device(self):
+        from core.models import Client, Scope
+
+        self.run_command()
+        self.run_command()  # idempotent
+        self.assertEqual(list(Client.objects.values_list("name", flat=True)), ["ISS"])
+        self.assertEqual(Scope.objects.count(), 1)
+        self.assertEqual(DeviceList.objects.get(id="2069691213314072577").scope.name, "Floor 2 - Toilet Pria")
+
+    def test_demo_and_cleanup(self):
+        from core.models import Client, Region, Scope
+
+        self.run_command("--demo")
+        self.assertEqual(sorted(Client.objects.values_list("name", flat=True)), ["BCA", "ISS", "Mandiri"])
+        self.assertEqual(Scope.objects.count(), 4)
+        demo_device = DeviceList.objects.create(id="demo-dev", scope=Scope.objects.get(name="Lobby - Toilet Pria"))
+        self.run_command("--cleanup-demo")
+        self.assertEqual(list(Client.objects.values_list("name", flat=True)), ["ISS"])
+        self.assertEqual(list(Region.objects.values_list("name", flat=True)), ["Banten"])
+        demo_device.refresh_from_db()
+        self.assertIsNone(demo_device.scope)  # device kept, back to "unassigned"
+        self.assertIsNotNone(DeviceList.objects.get(id="2069691213314072577").scope)
+
+    def test_missing_device_is_skipped(self):
+        import json
+        import tempfile
+
+        data = {"locations": [{"client": "X", "region": "R", "site": "S", "area": "A", "scope": "T",
+                               "devices": ["nope"]}]}
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as handle:
+            json.dump(data, handle)
+        output = self.run_command("--file", handle.name)
+        self.assertIn("nope not on this server, skipped", output)
+
+    def test_invalid_entry_is_rejected(self):
+        import json
+        import tempfile
+
+        from django.core.management.base import CommandError
+
+        from core.models import Client
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as handle:
+            json.dump({"locations": [{"client": "X", "region": "R"}]}, handle)
+        with self.assertRaises(CommandError):
+            self.run_command("--file", handle.name)
+        self.assertFalse(Client.objects.exists())

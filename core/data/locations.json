@@ -1,0 +1,18 @@
+{
+  "_help": "Locations loaded by `python manage.py seed_locations`. 'locations' are real and permanent; 'demo' only loads with --demo and is removed by --cleanup-demo. Devices that don't exist on a server are skipped.",
+  "locations": [
+    {
+      "client": "ISS",
+      "region": "Banten",
+      "site": "Bintaro",
+      "area": "Graha ISS",
+      "scope": "Floor 2 - Toilet Pria",
+      "devices": ["2069691213314072577"]
+    }
+  ],
+  "demo": [
+    {"client": "BCA", "region": "Jakarta", "site": "Thamrin", "area": "Gedung A", "scope": "Floor 10 - Toilet Pria West"},
+    {"client": "BCA", "region": "Jakarta", "site": "Thamrin", "area": "Gedung A", "scope": "Floor 10 - Toilet Wanita West"},
+    {"client": "Mandiri", "region": "Jakarta", "site": "Sudirman", "area": "Tower 1", "scope": "Lobby - Toilet Pria"}
+  ]
+}

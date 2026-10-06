@@ -1,7 +1,8 @@
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from core.models import Area, Client, DeviceList, Region, Scope, Site
+from core.locations import LEVELS, assign_devices, ensure_location
+from core.models import DeviceList
 
 
 class Command(BaseCommand):
@@ -23,30 +24,23 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
-        names = {level: options[level].strip() for level in ("client", "region", "site", "area", "scope")}
-        empty = [level for level, name in names.items() if not name]
-        if empty:
-            raise CommandError(f"Empty value for: {', '.join('--' + level for level in empty)}")
-
-        devices = list(DeviceList.objects.filter(id__in=options["device"]))
-        missing = sorted(set(options["device"]) - {device.id for device in devices})
+        missing = sorted(set(options["device"]) - set(DeviceList.objects.filter(id__in=options["device"])
+                                                       .values_list("id", flat=True)))
         if missing:
             raise CommandError(f"Unknown device ID(s): {', '.join(missing)}")
+        try:
+            scope, created = ensure_location(*(options[level] for level in LEVELS))
+        except ValueError as exc:
+            raise CommandError(str(exc)) from exc
 
-        client, client_new = Client.objects.get_or_create(name=names["client"])
-        region, region_new = Region.objects.get_or_create(name=names["region"])
-        site, site_new = Site.objects.get_or_create(client=client, region=region, name=names["site"])
-        area, area_new = Area.objects.get_or_create(site=site, name=names["area"])
-        scope, scope_new = Scope.objects.get_or_create(area=area, name=names["scope"])
+        objects = {"scope": scope, "area": scope.area, "site": scope.area.site,
+                   "region": scope.area.site.region, "client": scope.area.site.client}
+        for level in LEVELS:
+            label = level.capitalize()
+            self.stdout.write(f"{label:<7} {'created' if created[level] else 'exists '}  {objects[level].name}")
 
-        for label, obj, created in (("Client", client, client_new), ("Region", region, region_new),
-                                    ("Site", site, site_new), ("Area", area, area_new), ("Scope", scope, scope_new)):
-            self.stdout.write(f"{label:<7} {'created' if created else 'exists '}  {obj.name}")
-
-        for device in devices:
-            previous = device.scope
-            device.scope = scope
-            device.save(update_fields=["scope"])
+        assigned, _ = assign_devices(scope, options["device"])
+        for device, previous in assigned:
             note = "" if previous in (None, scope) else f" (was: {previous})"
             self.stdout.write(f"Device  assigned {device.id}{note}")
 
