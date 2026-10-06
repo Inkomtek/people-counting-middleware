@@ -12,7 +12,8 @@ class WorkOrder(models.Model):
 
     @property
     def wo_id(self):
-        return f"WO-{self.pk:06d}" if self.accepted else ""
+        # Numeric like Algospection's WO_NO (e.g. "280268").
+        return f"{self.pk:06d}" if self.accepted else ""
 
     def __str__(self):
         return self.wo_id or f"Rejected #{self.pk}"

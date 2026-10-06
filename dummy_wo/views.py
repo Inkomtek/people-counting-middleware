@@ -1,10 +1,17 @@
-"""Dummy stand-in for Algospection's api_iot.php until real access is available."""
+"""Dummy stand-in for Algospection's api_iot.php until real access is available.
+
+Replies in the same shape as the real server (captured 2026-10-06):
+success  -> 200 [{"error": 0, "results": [{"WO_NO": "280268", "EFCTV_DT": ..., "EXP_DT": ..., ...}]}]
+failure  -> 4xx [{"error": 1, "message": "..."}]  (the real error shape is not known yet; best guess)
+"""
 
 import json
+from datetime import timedelta
 
 from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from .models import WorkOrder
@@ -12,14 +19,30 @@ from .models import WorkOrder
 REQUIRED_FIELDS = ("token", "INSTANCE", "LOC_ID", "ASSET_ID", "REQ_TYP", "REQ_DESC")
 
 
+# Work Orders created by the real server stay valid for three days.
+WO_VALIDITY = timedelta(days=3)
+
+
 def _reply(payload, accepted, status, message):
     order = WorkOrder.objects.create(
         payload=payload, accepted=accepted, response_status=status, message=message
     )
-    body = {"status": "success" if accepted else "error", "message": message}
-    if accepted:
-        body["wo_id"] = order.wo_id
-    return JsonResponse(body, status=status)
+    if not accepted:
+        return JsonResponse([{"error": 1, "message": message}], status=status, safe=False)
+    now = timezone.localtime()
+    return JsonResponse([{
+        "error": 0,
+        "results": [{
+            "WO_NO": order.wo_id,
+            "EXP_DT": (now + WO_VALIDITY).strftime("%Y-%m-%d %H:%M:%S"),
+            "USR_NM": None,
+            "TECH_NM": None,
+            "EFCTV_DT": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "PRPRTY_NM": None,
+            "USR_EMAIL": None,
+            "LOC_ID_DESC": payload.get("LOC_ID"),
+        }],
+    }], status=status, safe=False)
 
 
 @csrf_exempt

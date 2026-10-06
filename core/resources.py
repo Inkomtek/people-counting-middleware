@@ -56,5 +56,6 @@ class NotificationLogResource(LogResource):
 
     class Meta:
         model = NotificationLog
-        fields = ("id", "time", "device", "endpoint_url", "response_status", "head", "body", "response")
+        fields = ("id", "time", "device", "endpoint_url", "response_status", "success", "wo_number", "head", "body",
+                  "response")
         export_order = fields

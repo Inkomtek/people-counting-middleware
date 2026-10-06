@@ -151,8 +151,8 @@ class SensorLogAdmin(ExportMixin, ReadOnlyAdmin):
 @admin.register(NotificationLog)
 class NotificationLogAdmin(ExportMixin, ReadOnlyAdmin):
     resource_classes = [NotificationLogResource]
-    list_display = ("time", "device", "endpoint_url", "response_status")
-    list_filter = ("response_status", "device")
+    list_display = ("time", "device", "endpoint_url", "response_status", "success", "wo_number")
+    list_filter = ("success", "response_status", "device")
     ordering = ("-time",)
 
 
@@ -188,7 +188,7 @@ def build_recap_rows(device_id="", date_from=None, date_to=None, limit=None):
         total=Count("id"), counted=Count("id", filter=Q(counted=True)),
     )
     notification_rows = notifications.values("day").annotate(
-        sent=Count("id"), success=Count("id", filter=Q(response_status__startswith="2")),
+        sent=Count("id"), success=Count("id", filter=Q(success=True)),
     )
     days = {}
     for row in event_rows:

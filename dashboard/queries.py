@@ -19,7 +19,8 @@ RECAP_DAILY = "daily"
 RECAP_MONTHLY = "monthly"
 STATUS_SUCCESS = "success"
 STATUS_FAILED = "failed"
-SUCCESS = Q(response_status__startswith="2")
+# NotificationLog.success already combines the HTTP status and Algospection's "error" flag.
+SUCCESS = Q(success=True)
 # Same rule as core.services.is_countable, as a queryset filter.
 COUNTED_EVENTS = Q(event_type__in=COUNTED_EVENT_TYPES, recognition_target=COUNTED_RECOGNITION_TARGET)
 # The Event Log only shows people going in or out (passby, turnback, ... are hidden).
@@ -34,12 +35,11 @@ def range_bounds(start, end):
 
 
 def wo_number(log):
-    response = log.response if isinstance(log.response, dict) else {}
-    return response.get("wo_id") or "–"
+    return log.wo_number or "–"
 
 
 def is_success(log):
-    return log.response_status.startswith("2")
+    return log.success
 
 
 def destination(log):
@@ -209,7 +209,7 @@ def work_orders(devices, start, end, status="", query=""):
     elif status == STATUS_FAILED:
         logs = logs.exclude(SUCCESS)
     if query:
-        logs = logs.filter(Q(response__wo_id__icontains=query) | Q(response_status__icontains=query))
+        logs = logs.filter(Q(wo_number__icontains=query) | Q(response_status__icontains=query))
     return logs
 
 

@@ -378,3 +378,34 @@ class AddLocationCommandTests(TestCase):
         with self.assertRaises(CommandError):
             self.run_command("--device", "nope")
         self.assertFalse(Client.objects.exists())
+
+
+class WorkOrderOutcomeTests(TestCase):
+    def test_algospection_reply(self):
+        from core.models import work_order_outcome
+
+        reply = [{"error": 0, "results": [{"WO_NO": "280268", "LOC_ID_DESC": "GRAHA ISS BINTARO"}]}]
+        self.assertEqual(work_order_outcome("200 OK", reply), (True, "280268"))
+        self.assertEqual(work_order_outcome("200 OK", [{"error": 1, "message": "Token tidak valid"}]), (False, ""))
+        self.assertEqual(work_order_outcome("401 Unauthorized", [{"error": 1}]), (False, ""))
+
+    def test_legacy_dummy_reply_and_errors(self):
+        from core.models import work_order_outcome
+
+        self.assertEqual(work_order_outcome("200 OK", {"status": "success", "wo_id": "WO-000019"}), (True, "WO-000019"))
+        self.assertEqual(work_order_outcome("ERROR", {"error": "connection refused"}), (False, ""))
+        self.assertEqual(work_order_outcome("500 Internal Server Error", {"raw": "<html>"}), (False, ""))
+        self.assertEqual(work_order_outcome("200 OK", None), (True, ""))
+
+    def test_log_stores_outcome_on_save(self):
+        device = DeviceList.objects.get(id="2069691213314072577")
+        log = NotificationLog.objects.create(
+            device=device, endpoint_url="x", response_status="200 OK",
+            response=[{"error": 0, "results": [{"WO_NO": "280268"}]}],
+        )
+        self.assertEqual((log.success, log.wo_number), (True, "280268"))
+        failed = NotificationLog.objects.create(
+            device=device, endpoint_url="x", response_status="200 OK", response=[{"error": 2}],
+        )
+        self.assertFalse(failed.success)
+

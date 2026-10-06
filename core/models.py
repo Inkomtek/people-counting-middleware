@@ -196,6 +196,24 @@ class SensorLog(models.Model):
         return f"{self.status} - {self.time}"
 
 
+def work_order_outcome(response_status, response):
+    """(succeeded, Work Order number) from a Work Order POST's HTTP status and JSON reply.
+
+    Algospection (and the dummy, which mirrors it) replies `[{"error": 0, "results": [{"WO_NO": ...}]}]`;
+    a 2xx with a non-zero "error" is a failure. Older dummy replies `{"status": "success", "wo_id": ...}`
+    are still understood so existing logs keep their numbers; anything else falls back to the HTTP status.
+    """
+    http_ok = str(response_status).startswith("2")
+    item = response[0] if isinstance(response, list) and response and isinstance(response[0], dict) else response
+    if not isinstance(item, dict):
+        return http_ok, ""  # no recognisable body: fall back to the HTTP status
+    if "error" in item:
+        results = item.get("results") or [{}]
+        number = results[0].get("WO_NO") if isinstance(results[0], dict) else None
+        return http_ok and item.get("error") in (0, "0"), str(number or "")
+    return http_ok and item.get("status", "success") == "success", str(item.get("wo_id") or "")
+
+
 class NotificationLog(models.Model):
     """Log of every Work Order POST."""
 
@@ -207,9 +225,16 @@ class NotificationLog(models.Model):
     head = models.JSONField(null=True, blank=True)
     response = models.JSONField(null=True, blank=True)
     response_status = models.CharField(max_length=50)
+    # Derived from response_status + response on every save (see work_order_outcome).
+    success = models.BooleanField(default=False, editable=False)
+    wo_number = models.CharField(max_length=100, blank=True, editable=False)
 
     def __str__(self):
         return f"{self.response_status} - {self.time}"
+
+    def save(self, *args, **kwargs):
+        self.success, self.wo_number = work_order_outcome(self.response_status, self.response)
+        super().save(*args, **kwargs)
 
 
 class DailyRecap(EventLog):
