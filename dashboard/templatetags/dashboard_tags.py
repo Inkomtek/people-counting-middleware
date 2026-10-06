@@ -9,7 +9,7 @@ register = template.Library()
 
 @register.simple_tag(takes_context=True)
 def tr(context, key, **values):
-    """Text for `key` in the page's language with {placeholders} filled, e.g. {% tr "floor_n" n=2 %}."""
+    """Text for `key` in the page's language with {placeholders} filled, e.g. {% tr "showing" start=1 end=20 total=255 %}."""
     text = context["t"].get(key, key)
     return text.format(**values) if values else text
 

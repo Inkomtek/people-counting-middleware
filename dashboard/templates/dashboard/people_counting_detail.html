@@ -1,0 +1,162 @@
+{% extends "dashboard/base.html" %}
+{% load humanize dashboard_tags %}
+{% block title %}{{ t.pc_detail }}{% endblock %}
+
+{# The header only picks the location here; each tab has its own date filters. #}
+{% block filter_hidden %}<input type="hidden" name="tab" value="{{ tab }}">{% endblock %}
+{% block date_filters %}{% endblock %}
+
+{% block breadcrumb %}
+<nav class="breadcrumb" aria-label="{{ t.breadcrumb }}">
+  <a href="{% url 'dashboard:overview' %}?{{ location_query }}">{% include "dashboard/_icon.html" with name="arrow-left" %} {{ t.overview }}</a><span>/</span>
+  <a href="{% url 'dashboard:people_counting' %}?{{ location_query }}">{{ module_name }}</a><span>/</span><span aria-current="page">{{ t.detail }}</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="page-title">
+  <span class="section-icon">{% include "dashboard/_icon.html" with name="people" %}</span>
+  <h2>{{ t.pc_detail }}</h2>
+  <nav class="segmented page-title-action" aria-label="{{ t.pc_detail }}">
+    <a href="?{{ location_query }}&tab=recap"{% if tab == "recap" %} aria-current="true"{% endif %}>{% if recap_period == "monthly" %}{{ t.recap_monthly }}{% else %}{{ t.recap_daily }}{% endif %}</a>
+    <a href="?{{ location_query }}&tab=wo"{% if tab == "wo" %} aria-current="true"{% endif %}>{{ t.wo_history }}</a>
+    <a href="?{{ location_query }}&tab=events"{% if tab == "events" %} aria-current="true"{% endif %}>{{ t.event_log }}</a>
+  </nav>
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      {% if tab == "recap" %}
+      <h2>{% if recap_period == "monthly" %}{{ t.recap_monthly }}{% else %}{{ t.recap_daily }}{% endif %}</h2>
+      <p class="muted small">{% if recap_period == "monthly" %}{% tr "recap_sub_monthly" start=start|date:"d M Y" end=end|date:"d M Y" %}{% else %}{% tr "recap_sub_daily" start=start|date:"d M Y" end=end|date:"d M Y" %}{% endif %}</p>
+      {% elif tab == "wo" %}
+      <h2>{{ t.wo_history }}</h2>
+      <p class="muted small">{% tr "wo_sub" start=start|date:"d M Y" end=end|date:"d M Y" %}</p>
+      {% else %}
+      <h2>{{ t.event_log }}</h2>
+      <p class="muted small">{% tr "events_sub" start=start|date:"d M Y" end=end|date:"d M Y" %}</p>
+      {% endif %}
+    </div>
+    <div class="actions">
+      <a class="btn" href="{% url 'dashboard:export' tab 'csv' %}{% querystring page=None %}">{% include "dashboard/_icon.html" with name="download" %} CSV</a>
+      <a class="btn" href="{% url 'dashboard:export' tab 'xlsx' %}{% querystring page=None %}">{% include "dashboard/_icon.html" with name="file" %} Excel</a>
+    </div>
+  </div>
+
+  <form class="toolbar toolbar--tab" method="get">
+    {% include "dashboard/_location_hidden.html" %}
+    <input type="hidden" name="tab" value="{{ tab }}">
+    {% if tab == "recap" and recap_period == "monthly" %}<input type="hidden" name="recap" value="monthly">{% endif %}
+    {% if tab == "wo" and wo_status %}<input type="hidden" name="status" value="{{ wo_status }}">{% endif %}
+    {% if tab == "wo" %}
+    <label class="field"><span>{{ t.search }}</span><input type="search" name="q" value="{{ wo_query }}" placeholder="{{ t.search_wo_placeholder }}"></label>
+    {% endif %}
+    <label class="field"><span>{{ t.device_id }}</span>
+      <select name="device" onchange="this.form.submit()">
+        <option value="">{% tr "all_devices" n=module_devices|length %}</option>
+        {% for d in module_devices %}<option value="{{ d.id }}"{% if d == selected_device %} selected{% endif %}>{{ d.label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="field"><span>{{ t.from }}</span><input type="date" name="start" value="{{ start|date:'Y-m-d' }}" max="{% now 'Y-m-d' %}" onchange="this.form.submit()"></label>
+    <label class="field"><span>{{ t.to }}</span><input type="date" name="end" value="{{ end|date:'Y-m-d' }}" max="{% now 'Y-m-d' %}" onchange="this.form.submit()"></label>
+    {% if tab == "events" %}
+    <label class="field"><span>{{ t.time_from }}</span><input type="time" name="time_from" value="{{ time_from }}"></label>
+    <label class="field"><span>{{ t.time_to }}</span><input type="time" name="time_to" value="{{ time_to }}"></label>
+    <label class="field"><span>{{ t.event_type }}</span>
+      <select name="event_type" onchange="this.form.submit()">
+        <option value="">{{ t.all }}</option>
+        {% for et in event_types %}<option value="{{ et }}"{% if et == event_type %} selected{% endif %}>{{ et }}</option>{% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    <button type="submit" class="btn btn--primary">{% include "dashboard/_icon.html" with name="search" %} {{ t.apply }}</button>
+    {% if tab == "recap" %}
+    <nav class="segmented" aria-label="{{ t.recap_period }}">
+      <a href="{% querystring recap=None %}"{% if recap_period != "monthly" %} aria-current="true"{% endif %}>{{ t.daily }}</a>
+      <a href="{% querystring recap='monthly' %}"{% if recap_period == "monthly" %} aria-current="true"{% endif %}>{{ t.monthly }}</a>
+    </nav>
+    {% elif tab == "wo" %}
+    <nav class="segmented" aria-label="{{ t.status }}">
+      <a href="{% querystring status=None page=None %}"{% if not wo_status %} aria-current="true"{% endif %}>{{ t.all }}</a>
+      <a href="{% querystring status='success' page=None %}"{% if wo_status == "success" %} aria-current="true"{% endif %}>{{ t.success }}</a>
+      <a href="{% querystring status='failed' page=None %}"{% if wo_status == "failed" %} aria-current="true"{% endif %}>{{ t.failed }}</a>
+    </nav>
+    {% endif %}
+  </form>
+
+  {% if tab == "recap" %}
+  <div class="summary-cards">
+    <div class="summary"><span class="kpi-label">{{ t.visitors_in }}</span><strong>{{ recap_totals.people_in|intcomma }}</strong></div>
+    <div class="summary"><span class="kpi-label">{{ t.events_received }}</span><strong>{{ recap_totals.total|intcomma }}</strong></div>
+    <div class="summary"><span class="kpi-label">{{ t.wo_sent }}</span><strong>{{ recap_totals.sent|intcomma }}</strong></div>
+    <div class="summary"><span class="kpi-label">{{ t.success_failed }}</span><strong><span class="text-ok">{{ recap_totals.success|intcomma }}</span> / <span class="text-bad">{{ recap_totals.failed|intcomma }}</span></strong></div>
+  </div>
+  <div class="chart-block">
+    <div class="card-head">
+      <div>
+        <h3>{% if recap_period == "monthly" %}{{ t.monthly_traffic }}{% else %}{{ t.daily_traffic }}{% endif %}</h3>
+        <p class="muted small">{% if recap_period == "monthly" %}{{ t.visitors_per_month }}{% else %}{{ t.visitors_per_day }}{% endif %} · {{ start|date:"d M Y" }} – {{ end|date:"d M Y" }}</p>
+        {% if traffic.busiest %}
+        <p class="busiest small">{% if recap_period == "monthly" %}{% tr "busiest_month" day=traffic.busiest|date:"F Y" n=traffic.peak|intcomma %}{% else %}{% tr "busiest_day" day=traffic.busiest|date:"D, d M Y" n=traffic.peak|intcomma %}{% endif %}</p>
+        {% endif %}
+      </div>
+      <div class="legend small">
+        <span><i class="legend-bar"></i>{{ t.legend_visitors }}</span>
+        <span><i class="legend-bar legend-bar--notif"></i>{{ t.legend_wo }}</span>
+      </div>
+    </div>
+    {% if traffic.scale %}
+    <div class="chart chart--paired" role="img" aria-label="{% tr 'daily_chart_label' n=traffic.peak|intcomma %}">
+      <div class="chart-scale small muted"><span>{{ traffic.scale|intcomma }}</span><span>0</span></div>
+      <div class="chart-bars chart-bars--flex" style="--bars: {{ traffic.bars|length }}">
+        {% for b in traffic.bars %}
+        <div class="bar-col{% if b.period == traffic.busiest %} bar-col--peak{% endif %}" title="{% if recap_period == 'monthly' %}{{ b.period|date:'F Y' }}{% else %}{{ b.period|date:'D, d M Y' }}{% endif %} · {{ t.legend_visitors }} {{ b.count|intcomma }} · {{ t.legend_wo }} {{ b.sent|intcomma }}">
+          <div class="bar-area bar-pair">
+            <span class="bar-stack">
+              {% if b.count %}<span class="bar-value">{{ b.count|intcomma }}</span>{% endif %}
+              <span class="bar" style="height: calc((100% - 18px) * {{ b.pct }} / 100)"></span>
+            </span>
+            <span class="bar-stack">
+              {% if b.sent %}<span class="bar-value">{{ b.sent|intcomma }}</span>{% endif %}
+              <span class="bar bar--notif" style="height: calc((100% - 18px) * {{ b.sent_pct }} / 100)"></span>
+            </span>
+          </div>
+          <span class="bar-label">{% if b.show_label %}{{ b.label }}{% endif %}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% else %}
+    <div class="empty">{{ t.no_data_for_date }}</div>
+    {% endif %}
+  </div>
+  <div class="table-wrap" id="table">
+    <table>
+      <thead><tr><th>{% if recap_period == "monthly" %}{{ t.month }}{% else %}{{ t.date }}{% endif %}</th><th class="num">{{ t.events_received }}</th><th class="num">{{ t.visitors_in }}</th><th class="num">{{ t.wo_sent }}</th><th class="num">{{ t.success }}</th><th class="num">{{ t.failed }}</th></tr></thead>
+      <tbody>
+        {% for r in recap %}
+        <tr>
+          <td>{% if recap_period == "monthly" %}{{ r.period|date:"F Y" }}{% else %}{{ r.period|date:"D, d M Y" }}{% endif %}</td>
+          <td class="num">{{ r.total|intcomma }}</td>
+          <td class="num strong">{{ r.people_in|intcomma }}</td>
+          <td class="num">{{ r.sent|intcomma }}</td>
+          <td class="num text-ok">{{ r.success|intcomma }}</td>
+          <td class="num{% if r.failed %} text-bad{% endif %}">{{ r.failed|intcomma }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="empty">{{ t.no_data }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "dashboard/_pager.html" %}
+  {% elif tab == "wo" %}
+  <div id="table">{% include "dashboard/_wo_table.html" %}</div>
+  {% include "dashboard/_pager.html" %}
+  {% else %}
+  <div id="table">{% include "dashboard/_event_table.html" %}</div>
+  {% include "dashboard/_pager.html" %}
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,1 @@
+{% if is_today %}{{ t.preset_today }} · {{ start|date:"D, d M Y" }}{% elif single_day %}{{ start|date:"D, d M Y" }}{% else %}{{ start|date:"d M Y" }} – {{ end|date:"d M Y" }}{% endif %}

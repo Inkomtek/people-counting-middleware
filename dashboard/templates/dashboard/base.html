@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}{{ t.overview }}{% endblock %} · {{ toilet.building|default:"Smart Washroom" }}</title>
+<title>{% block title %}{{ t.overview }}{% endblock %} · {% if location.unassigned %}{{ t.unassigned }}{% else %}{{ location.title|default:t.all_locations }}{% endif %}</title>
 <link rel="icon" href="{% static 'dashboard/img/favicon.svg' %}" type="image/svg+xml">
 <link rel="stylesheet" href="{% static_v 'dashboard/dashboard.css' %}">
 <script>
@@ -22,21 +22,6 @@
       </span>
     </div>
     <div class="topbar-right">
-      {% if day %}
-      <form class="date-nav" method="get">
-        <input type="hidden" name="building" value="{{ toilet.building }}">
-        <input type="hidden" name="floor" value="{{ toilet.floor }}">
-        <input type="hidden" name="gender" value="{{ toilet.gender }}">
-        {% if selected_device %}<input type="hidden" name="device" value="{{ selected_device.id }}">{% endif %}
-        <a class="icon-btn" href="?{{ nav_query }}&date={{ prev_day|date:'Y-m-d' }}" aria-label="{{ t.prev_day }}">{% include "dashboard/_icon.html" with name="chevron-left" %}</a>
-        <label class="date-pill">
-          {% include "dashboard/_icon.html" with name="calendar" %}
-          <span>{% if is_today %}{{ t.today }} · {% endif %}{{ day|date:"D, d M Y" }}</span>
-          <input type="date" name="date" value="{{ day|date:'Y-m-d' }}" max="{% now 'Y-m-d' %}" onchange="this.form.submit()" aria-label="{{ t.pick_date }}">
-        </label>
-        {% if next_day %}<a class="icon-btn" href="?{{ nav_query }}&date={{ next_day|date:'Y-m-d' }}" aria-label="{{ t.next_day }}">{% include "dashboard/_icon.html" with name="chevron-right" %}</a>{% endif %}
-      </form>
-      {% endif %}
       <span class="updated" data-updated data-label="{{ t.updated }}" data-updating="{{ t.updating }}" aria-live="polite">
         {% include "dashboard/_icon.html" with name="refresh" %}
         <span data-updated-text>{{ t.updated }} {% now "H:i:s" %} WIB</span>
@@ -53,41 +38,42 @@
   {% block location %}
   <section class="location">
     <div>
-      {% block breadcrumb %}{% endblock %}
-      <h1>{{ toilet.building|default:t.no_location }}</h1>
+      <span class="eyebrow">{{ t.location_eyebrow }}</span>
+      <h1>{% if location.unassigned %}{{ t.unassigned }}{% else %}{{ location.title|default:t.all_locations }}{% endif %}</h1>
       <div class="chips">
-        {% if toilet.floor %}<span class="chip">{% tr "floor_n" n=toilet.floor %}</span>{% endif %}
-        {% if toilet.gender_label %}<span class="chip">{{ toilet.gender_label }}</span>{% endif %}
-        {% block chips %}{% endblock %}
+        {% if location.unassigned %}<span class="chip">{{ t.unassigned_hint }}</span>{% endif %}
+        {% for chip in location.chips %}<span class="chip">{{ chip }}</span>{% endfor %}
       </div>
     </div>
     <form class="filters" method="get">
-      <input type="hidden" name="date" value="{{ day|date:'Y-m-d' }}">
-      {% if options.buildings|length > 1 %}
-      <label class="field"><span>{{ t.building }}</span>
-        <select name="building" onchange="this.form.submit()">
-          {% for b in options.buildings %}<option value="{{ b }}" {% if b == toilet.building %}selected{% endif %}>{{ b }}</option>{% endfor %}
-        </select>
+      {% block filter_hidden %}{% endblock %}
+      {% include "dashboard/_location_select.html" with name="client" label=t.client choices=location.choices.client selected=location.selected.client %}
+      {% if location.selected.client %}{% include "dashboard/_location_select.html" with name="region" label=t.region choices=location.choices.region selected=location.selected.region %}{% endif %}
+      {% if location.selected.region %}{% include "dashboard/_location_select.html" with name="site" label=t.site choices=location.choices.site selected=location.selected.site %}{% endif %}
+      {% if location.selected.site %}{% include "dashboard/_location_select.html" with name="area" label=t.area choices=location.choices.area selected=location.selected.area %}{% endif %}
+      {% if location.selected.area %}{% include "dashboard/_location_select.html" with name="scope" label=t.scope choices=location.choices.scope selected=location.selected.scope %}{% endif %}
+      {% block date_filters %}
+      <label class="field"><span>{{ t.date_from }}</span>
+        <input type="date" name="start" value="{{ start|date:'Y-m-d' }}" max="{% now 'Y-m-d' %}" onchange="this.form.submit()">
       </label>
-      {% else %}<input type="hidden" name="building" value="{{ toilet.building }}">{% endif %}
-      <label class="field"><span>{{ t.floor }}</span>
-        <select name="floor" onchange="this.form.submit()">
-          {% for f in options.floors %}<option value="{{ f }}" {% if f == toilet.floor %}selected{% endif %}>{% tr "floor_n" n=f %}</option>{% empty %}<option>–</option>{% endfor %}
-        </select>
+      <label class="field"><span>{{ t.date_to }}</span>
+        <input type="date" name="end" value="{{ end|date:'Y-m-d' }}" max="{% now 'Y-m-d' %}" onchange="this.form.submit()">
       </label>
-      <label class="field"><span>{{ t.gender }}</span>
-        <select name="gender" onchange="this.form.submit()">
-          {% for value, label in options.genders %}<option value="{{ value }}" {% if value == toilet.gender %}selected{% endif %}>{{ label }}</option>{% empty %}<option>–</option>{% endfor %}
-        </select>
-      </label>
-      {% block extra_filters %}{% endblock %}
+      <nav class="segmented presets" aria-label="{{ t.quick_range }}">
+        {% for key in presets %}
+        <a href="?{{ location_query }}&range={{ key }}"{% if key == preset %} aria-current="true"{% endif %}>{% if key == "today" %}{{ t.preset_today }}{% elif key == "7" %}{{ t.preset_7 }}{% else %}{{ t.preset_30 }}{% endif %}</a>
+        {% endfor %}
+      </nav>
+      {% endblock %}
       <noscript><button type="submit" class="btn">{{ t.apply }}</button></noscript>
     </form>
   </section>
   {% endblock %}
 
+  {% block breadcrumb %}{% endblock %}
+
   <div class="alert alert--warn" data-offline-alert role="status" hidden>{{ t.offline_alert }}</div>
-  <div data-alerts>{% if stale %}<div class="alert alert--bad" role="status">{% if stale.never %}{{ t.stale_never }}{% else %}{% tr "stale_alert" time=stale.time|date:"H:i" n=stale.minutes %}{% endif %}</div>{% endif %}</div>
+  <div data-alerts>{% block alerts %}{% if stale %}<div class="alert alert--bad" role="status">{% if stale.never %}{{ t.stale_never }}{% else %}{% tr "stale_alert" time=stale.time|date:"H:i" n=stale.minutes %}{% endif %}</div>{% endif %}{% endblock %}</div>
 
   <main id="content">
     {% block content %}{% endblock %}

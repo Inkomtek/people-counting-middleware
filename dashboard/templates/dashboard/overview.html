@@ -3,31 +3,27 @@
 {% block title %}{{ t.overview }}{% endblock %}
 
 {% block content %}
+<div class="section-title">
+  <h2>{{ t.sensor_summary }}</h2>
+  <span class="muted small">{{ t.period_label }} {% include "dashboard/_period.html" %} · {% tr "active_modules" n=active_modules total=sections|length %}</span>
+</div>
 <div class="bento">
   {% for s in sections %}
   {% if s.active %}
-  <a class="card section section--active" href="{% url 'dashboard:people_counting' %}?{{ filter_query }}">
+  <a class="card section section--people" href="{% url 'dashboard:people_counting' %}?{{ filter_query }}">
     <div class="section-head">
       <span class="section-icon">{% include "dashboard/_icon.html" with name=s.icon %}</span>
+      {% if sensors %}<span class="badge {% if online_count == sensors|length %}badge--ok{% else %}badge--warn{% endif %}"><i class="dot"></i>{% tr "n_online" n=online_count total=sensors|length %}</span>{% endif %}
     </div>
     <h2 class="section-name">{{ s.name }}</h2>
-    <div class="section-metric">
+    <div class="section-metric section-metric--stack">
       <span class="metric">{{ kpis.people_in|intcomma }}</span>
-      <span class="metric-label">{% if is_today %}{{ t.visitors_in_today }}{% else %}{{ t.visitors_in }} {{ day|date:"d M" }}{% endif %}</span>
+      <span class="metric-label">{% if is_today %}{{ t.visitors_in_today_card }}{% else %}{{ t.visitors_in_range_card }} · {% include "dashboard/_period.html" %}{% endif %}</span>
     </div>
-    <div class="section-stats">
-      <div><span class="muted">{{ t.sensors_installed }}</span><strong>{{ people_devices|intcomma }}</strong></div>
-      <div><span class="muted">{{ t.wo_sent }}</span><strong>{{ kpis.wo_sent|intcomma }}</strong></div>
+    <div class="section-foot">
+      <span class="muted">{{ t.notifications_sent }}</span>
+      <span>{% tr "n_success_failed" n=kpis.wo_sent|intcomma s=kpis.wo_success|intcomma f=kpis.wo_failed|intcomma %}</span>
     </div>
-    {% for c in kpis.counters %}
-    <div class="counter-row small">
-      <span class="counter-head"><span class="truncate">{% if kpis.counters|length > 1 %}{{ c.label }}{% else %}{{ t.towards_next_wo }}{% endif %}</span><strong>{{ c.current_count|intcomma }} / {{ c.maximum_trigger|intcomma }}</strong></span>
-      <div class="progress" role="progressbar" aria-valuenow="{{ c.progress }}" aria-valuemin="0" aria-valuemax="100" aria-label="{% tr 'progress_to_wo' name=c.label %}">
-        <span style="width: {{ c.progress }}%"{% if c.progress >= 80 %} class="warn"{% endif %}></span>
-      </div>
-    </div>
-    {% endfor %}
-    <span class="section-link">{{ t.see_detail }} {% include "dashboard/_icon.html" with name="arrow-right" %}</span>
   </a>
   {% else %}
     {% if s.summary.has_data %}

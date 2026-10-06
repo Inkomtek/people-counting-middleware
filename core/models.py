@@ -30,6 +30,67 @@ class Endpoint(models.Model):
         return f"{self.id} ({self.type})"
 
 
+# ---------- Location hierarchy: Client + Region -> Site -> Area -> Scope (one Scope = one toilet) ----------
+
+class Client(models.Model):
+    name = models.CharField(max_length=200, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class Region(models.Model):
+    """Shared by every client, e.g. Jakarta."""
+
+    name = models.CharField(max_length=200, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class Site(models.Model):
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name="sites")
+    region = models.ForeignKey(Region, on_delete=models.CASCADE, related_name="sites")
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        ordering = ["client__name", "region__name", "name"]
+        constraints = [models.UniqueConstraint(fields=["client", "region", "name"], name="unique_site")]
+
+    def __str__(self):
+        return f"{self.client} · {self.region} · {self.name}"
+
+
+class Area(models.Model):
+    site = models.ForeignKey(Site, on_delete=models.CASCADE, related_name="areas")
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        ordering = ["site__client__name", "site__region__name", "site__name", "name"]
+        constraints = [models.UniqueConstraint(fields=["site", "name"], name="unique_area")]
+
+    def __str__(self):
+        return f"{self.site} · {self.name}"
+
+
+class Scope(models.Model):
+    area = models.ForeignKey(Area, on_delete=models.CASCADE, related_name="scopes")
+    name = models.CharField(max_length=200)
+
+    class Meta:
+        ordering = ["area__site__client__name", "area__site__region__name", "area__site__name", "area__name", "name"]
+        constraints = [models.UniqueConstraint(fields=["area", "name"], name="unique_scope")]
+
+    def __str__(self):
+        return f"{self.area} · {self.name}"
+
+
 class DeviceList(models.Model):
     # Device type = the dashboard module the device belongs to. Only TYPE_PEOPLE is synced from ZK so far.
     TYPE_PEOPLE = "people"
@@ -60,6 +121,9 @@ class DeviceList(models.Model):
     building = models.CharField(max_length=200, blank=True)
     floor = models.CharField(max_length=50, blank=True)
     gender = models.CharField(max_length=10, choices=GENDER_CHOICES, blank=True)
+    # The toilet in the client/region/site/area/scope hierarchy; the dashboard filters by it.
+    # SET_NULL (not CASCADE): deleting a location must never delete a device and its history.
+    scope = models.ForeignKey(Scope, on_delete=models.SET_NULL, null=True, blank=True, related_name="devices")
 
     class Meta:
         verbose_name = "device"

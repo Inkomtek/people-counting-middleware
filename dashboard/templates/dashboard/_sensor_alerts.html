@@ -1,0 +1,1 @@
+{% load dashboard_tags %}{% for s in offline_sensors %}<div class="alert alert--bad alert--rich" role="status"><strong>{{ t.sensor_unreachable }}</strong><span>{% if s.last_sync %}{% tr "sensor_unreachable_body" name=s.device.label time=s.last_sync|date:"H:i" %}{% else %}{% tr "sensor_never_synced" name=s.device.label %}{% endif %}</span></div>{% endfor %}

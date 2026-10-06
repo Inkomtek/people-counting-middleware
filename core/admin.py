@@ -8,7 +8,10 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 from import_export.admin import ExportMixin
 
-from .models import DailyRecap, DeviceList, Endpoint, EventLog, NotificationLog, SchedulerConfig, SensorLog
+from .models import (
+    Area, Client, DailyRecap, DeviceList, Endpoint, EventLog, NotificationLog, Region, SchedulerConfig, Scope,
+    SensorLog, Site,
+)
 from .resources import EventLogResource, NotificationLogResource, SensorLogResource
 
 RECAP_DAYS = 30
@@ -67,11 +70,45 @@ class EndpointAdmin(admin.ModelAdmin):
     list_filter = ("type", "is_active")
 
 
+@admin.register(Client, Region)
+class LocationNameAdmin(admin.ModelAdmin):
+    search_fields = ("name",)
+
+
+@admin.register(Site)
+class SiteAdmin(admin.ModelAdmin):
+    list_display = ("name", "client", "region")
+    list_filter = ("client", "region")
+    search_fields = ("name", "client__name", "region__name")
+    autocomplete_fields = ("client", "region")
+
+
+@admin.register(Area)
+class AreaAdmin(admin.ModelAdmin):
+    list_display = ("name", "site")
+    list_filter = ("site__client", "site__region", "site")
+    search_fields = ("name", "site__name", "site__client__name")
+    autocomplete_fields = ("site",)
+    list_select_related = ("site__client", "site__region")
+
+
+@admin.register(Scope)
+class ScopeAdmin(admin.ModelAdmin):
+    list_display = ("name", "area")
+    list_filter = ("area__site__client", "area__site__region", "area__site", "area")
+    search_fields = ("name", "area__name", "area__site__name", "area__site__client__name")
+    autocomplete_fields = ("area",)
+    list_select_related = ("area__site__client", "area__site__region")
+
+
 @admin.register(DeviceList)
 class DeviceListAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "type", "building", "floor", "gender", "current_count", "maximum_trigger", "baseline_done")
-    list_filter = ("type", "building", "floor", "gender")
+    list_display = ("id", "name", "type", "scope", "building", "floor", "gender", "current_count", "maximum_trigger",
+                    "baseline_done")
+    list_filter = ("type", "scope__area__site__client", "scope__area__site", "building", "floor", "gender")
     list_editable = ("maximum_trigger",)
+    autocomplete_fields = ("scope",)
+    list_select_related = ("scope__area__site__client", "scope__area__site__region")
 
 
 @admin.register(SchedulerConfig)

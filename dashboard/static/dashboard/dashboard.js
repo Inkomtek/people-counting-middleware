@@ -50,6 +50,13 @@
     if (updatedText) updatedText.textContent = updated.dataset.label + " " + clock.format(time) + " WIB";
   }
 
+  function assetVersions(doc) {
+    return Array.prototype.map.call(
+      doc.querySelectorAll('link[rel="stylesheet"][href*="?v="], script[src*="?v="]'),
+      function (el) { return el.getAttribute("href") || el.getAttribute("src"); }
+    ).join("|");
+  }
+
   function busy() {
     var el = document.activeElement;
     return el && /INPUT|SELECT|TEXTAREA/.test(el.tagName);
@@ -67,6 +74,12 @@
       })
       .then(function (html) {
         var doc = new DOMParser().parseFromString(html, "text/html");
+        // A deploy changed the CSS/JS (their URLs carry a version): swapping new markup into a page
+        // still running the old stylesheet breaks the layout, so reload the whole page instead.
+        if (assetVersions(doc) !== assetVersions(document)) {
+          window.location.reload();
+          return;
+        }
         SWAP.forEach(function (selector) {
           var fresh = doc.querySelector(selector);
           var current = document.querySelector(selector);

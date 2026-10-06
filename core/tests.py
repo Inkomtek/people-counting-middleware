@@ -340,3 +340,41 @@ class EventLogTimeRangeFilterTests(TestCase):
         self.assertEqual(response.status_code, 200)
         ids = [obj.id for obj in response.context["cl"].result_list]
         self.assertEqual(ids, ["mid"])
+
+
+class AddLocationCommandTests(TestCase):
+    def run_command(self, *extra):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command("add_location", "--client", "ISS", "--region", "Banten", "--site", "Bintaro",
+                     "--area", "Graha ISS", "--scope", "Floor 2 - Toilet Pria", *extra, stdout=out)
+        return out.getvalue()
+
+    def test_creates_hierarchy_and_assigns_device(self):
+        from core.models import Scope
+
+        output = self.run_command("--device", "2069691213314072577")
+        scope = Scope.objects.get(name="Floor 2 - Toilet Pria")
+        self.assertEqual(str(scope), "ISS · Banten · Bintaro · Graha ISS · Floor 2 - Toilet Pria")
+        self.assertEqual(DeviceList.objects.get(id="2069691213314072577").scope, scope)
+        self.assertIn("Scope   created", output)
+
+    def test_is_idempotent(self):
+        from core.models import Area, Client, Region, Scope, Site
+
+        self.run_command()
+        output = self.run_command()
+        self.assertEqual([m.objects.count() for m in (Client, Region, Site, Area, Scope)], [1, 1, 1, 1, 1])
+        self.assertIn("Scope   exists", output)
+
+    def test_unknown_device_creates_nothing(self):
+        from django.core.management.base import CommandError
+
+        from core.models import Client
+
+        with self.assertRaises(CommandError):
+            self.run_command("--device", "nope")
+        self.assertFalse(Client.objects.exists())

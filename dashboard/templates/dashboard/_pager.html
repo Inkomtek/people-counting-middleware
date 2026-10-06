@@ -1,0 +1,23 @@
+{% load humanize dashboard_tags %}{% with page=pager.page %}{% if page.paginator.count %}
+<nav class="pager small" aria-label="{{ t.pagination }}">
+  <span class="muted">{% tr "showing" start=page.start_index|intcomma end=page.end_index|intcomma total=page.paginator.count|intcomma %}</span>
+  <form class="pager-size" method="get"{% if pager.anchor %} action="#{{ pager.anchor }}"{% endif %}>
+    {% for key, value in pager.hidden %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+    <label><span class="muted">{{ t.rows_per_page }}</span>
+      <select name="{{ pager.size_param }}" onchange="this.form.submit()">
+        {% for size in pager.sizes %}<option value="{{ size }}"{% if size == pager.size %} selected{% endif %}>{{ size }}</option>{% endfor %}
+      </select>
+    </label>
+    <noscript><button type="submit" class="btn btn--sm">{{ t.apply }}</button></noscript>
+  </form>
+  <span class="pager-links">
+    {% if pager.prev_url %}<a class="btn btn--sm" href="{{ pager.prev_url }}" aria-label="{{ t.previous }}">‹</a>{% else %}<span class="btn btn--sm is-disabled" aria-hidden="true">‹</span>{% endif %}
+    {% for link in pager.links %}
+    {% if link.gap %}<span class="pager-gap" aria-hidden="true">…</span>
+    {% elif link.current %}<span class="btn btn--sm is-current" aria-current="page">{{ link.number }}</span>
+    {% else %}<a class="btn btn--sm" href="{{ link.url }}">{{ link.number }}</a>{% endif %}
+    {% endfor %}
+    {% if pager.next_url %}<a class="btn btn--sm" href="{{ pager.next_url }}" aria-label="{{ t.next }}">›</a>{% else %}<span class="btn btn--sm is-disabled" aria-hidden="true">›</span>{% endif %}
+  </span>
+</nav>
+{% endif %}{% endwith %}

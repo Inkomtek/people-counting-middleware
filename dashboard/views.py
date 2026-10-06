@@ -1,21 +1,24 @@
 from datetime import timedelta
 from functools import wraps
-from urllib.parse import urlencode
 
 import tablib
 from django.core.paginator import Paginator
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.shortcuts import render
 from django.utils import timezone
-from django.utils.dateparse import parse_date, parse_datetime
+from django.utils.dateparse import parse_date, parse_time
+from django.utils.formats import date_format
 from django.utils.text import slugify
 from django.utils.translation import override
 
 from core.models import DeviceList, SchedulerConfig
 
-from . import i18n, queries
+from . import i18n, locations, queries
 
-PAGE_SIZE = 25
+# Rows per page: the user picks one of PAGE_SIZES per table (not remembered between visits).
+PAGE_SIZES = (10, 20, 50, 100)
+DETAIL_PAGE_SIZE = 20
+PREVIEW_PAGE_SIZE = 10
 # Overview cards, in display order; the name comes from i18n ("module_<key>").
 SECTIONS = [
     {"key": "people", "icon": "people", "active": True},
@@ -26,6 +29,11 @@ SECTIONS = [
     {"key": "trash", "icon": "trash"},
     {"key": "ammonia", "icon": "air"},
 ]
+# Quick date ranges: key -> number of days ending today.
+PRESETS = {"today": 1, "7": 7, "30": 30}
+DETAIL_TABS = ("recap", "wo", "events")
+# Default date range per detail tab when none is given (the recap chart reads best over a week).
+DETAIL_DEFAULT_RANGE = {"recap": "7", "wo": "30", "events": "30"}
 LANGUAGE_COOKIE_AGE = 365 * 24 * 60 * 60
 
 
@@ -42,47 +50,6 @@ def localized(view):
     return wrapper
 
 
-def _selection(request, lang):
-    """Resolve the building/floor/gender filters to one toilet, plus the selected date.
-
-    Returns None when no device is registered at all.
-    """
-    params = request.GET
-    devices = DeviceList.objects.order_by("building", "floor", "gender", "id")
-    if not devices.exists():
-        return None
-    located = devices.exclude(building="")
-    chosen = located.filter(
-        **{field: params[field] for field in ("building", "floor", "gender") if params.get(field)}
-    ).first()
-    anchor = chosen or located.first() or devices.first()
-    toilet = {
-        "building": anchor.building,
-        "floor": anchor.floor,
-        "gender": anchor.gender,
-        "gender_label": i18n.GENDER_LABELS[lang].get(anchor.gender, ""),
-    }
-
-    today = timezone.localdate()
-    day = min(parse_date(params.get("date") or "") or today, today)
-    toilet_query = urlencode({k: toilet[k] for k in ("building", "floor", "gender")})
-    config = SchedulerConfig.get()
-    options = queries.location_options()
-    options["genders"] = [(value, i18n.GENDER_LABELS[lang][value]) for value, _ in options["genders"]]
-    return {
-        **_base_context(lang, config),
-        "toilet": toilet,
-        "day": day,
-        "is_today": day == today,
-        "prev_day": day - timedelta(days=1),
-        "next_day": day + timedelta(days=1) if day < today else None,
-        "options": options,
-        # Query strings: nav_query keeps the toilet (+ device on module pages) for date links.
-        "nav_query": toilet_query,
-        "filter_query": f"{toilet_query}&date={day:%Y-%m-%d}",
-    }
-
-
 def _base_context(lang, config=None):
     config = config or SchedulerConfig.get()
     return {
@@ -94,23 +61,60 @@ def _base_context(lang, config=None):
     }
 
 
+def _date_range(params, default_preset):
+    """Resolve ?range=today|7|30 or ?start=&end= (WIB dates, inclusive) to (start, end, preset)."""
+    today = timezone.localdate()
+    preset = params.get("range")
+    start, end = parse_date(params.get("start") or ""), parse_date(params.get("end") or "")
+    if preset not in PRESETS and not (start or end):
+        preset = default_preset
+    if preset in PRESETS:
+        return today - timedelta(days=PRESETS[preset] - 1), today, preset
+    end = min(end or today, today)
+    start = min(start or end, end)
+    return start, end, ""
+
+
+def _selection(request, lang, default_preset="today"):
+    """Resolve the Client/Region/Site/Area/Scope filters to one toilet, plus the date range.
+
+    Returns None when no device is registered at all.
+    """
+    params = request.GET
+    location = locations.resolve(params)
+    if location is None:
+        return None
+    start, end, preset = _date_range(params, default_preset)
+    today = timezone.localdate()
+    config = SchedulerConfig.get()
+    range_query = f"range={preset}" if preset else f"start={start:%Y-%m-%d}&end={end:%Y-%m-%d}"
+    return {
+        **_base_context(lang, config),
+        "location": location,
+        "start": start,
+        "end": end,
+        "preset": preset,
+        "presets": PRESETS,
+        "single_day": start == end,
+        "is_today": start == end == today,
+        "includes_today": end == today,
+        "location_query": location["query"],
+        # Keeps the location and the date range when moving between pages.
+        "filter_query": f"{location['query']}&{range_query}",
+    }
+
+
 def _module_devices(ctx, module, selected_id=""):
-    """Devices of one module (DeviceList.type) in the selected toilet; `selected_id` narrows to one."""
-    toilet = ctx["toilet"]
-    devices = list(DeviceList.objects.filter(
-        type=module, building=toilet["building"], floor=toilet["floor"], gender=toilet["gender"],
-    ).order_by("name", "id"))
+    """Devices of one module (DeviceList.type) at the selected toilet; `selected_id` narrows to one."""
+    devices = list(DeviceList.objects.filter(type=module, **ctx["location"]["device_filter"]).order_by("name", "id"))
     selected = next((d for d in devices if d.id == selected_id), None)
-    if selected:
-        ctx["nav_query"] += f"&device={selected.id}"
-        ctx["filter_query"] += f"&device={selected.id}"
     ctx.update(module_devices=devices, selected_device=selected)
     return [selected] if selected else devices
 
 
 def _stale_alert(ctx, devices):
     """Minutes since sensor data last arrived, when that is too long ago to trust today's figures."""
-    if not ctx["is_today"] or not devices:
+    if not ctx["includes_today"] or not devices:
         return None
     last = queries.last_successful_sync(devices)
     # Stale after three missed syncs, but never sooner than 5 minutes.
@@ -121,11 +125,71 @@ def _stale_alert(ctx, devices):
     return {"time": last, "minutes": minutes} if minutes > threshold else None
 
 
-def _parse_local(value):
-    parsed = parse_datetime(value) if value else None
-    if parsed is not None and timezone.is_naive(parsed):
-        parsed = timezone.make_aware(parsed)
-    return parsed
+def _sensor_context(ctx, devices):
+    statuses = queries.sensor_statuses(devices)
+    ctx.update(
+        sensors=statuses,
+        online_count=sum(s["online"] for s in statuses),
+        offline_sensors=[s for s in statuses if not s["online"]],
+        stale=_stale_alert(ctx, devices),
+    )
+
+
+MAX_CHART_LABELS = 15
+
+
+def _label_days(traffic, monthly):
+    """Axis labels for the daily/monthly traffic chart: just the day number (or month name);
+    long ranges only label every Nth bar so labels never overlap."""
+    bars = traffic["bars"]
+    every = max(1, -(-len(bars) // MAX_CHART_LABELS))
+    for i, bar in enumerate(bars):
+        bar["label"] = date_format(bar["period"], "M" if monthly else "d")
+        bar["show_label"] = i % every == 0
+    return traffic
+
+
+def _paginate(request, items, prefix="", default_size=DETAIL_PAGE_SIZE, anchor=""):
+    """Paginate `items` with ?<prefix>page= and ?<prefix>size= (one of PAGE_SIZES), so several tables
+    on one page page independently. Returns (page, pager) where pager drives _pager.html."""
+    params = request.GET
+    page_param, size_param = f"{prefix}page", f"{prefix}size"
+    try:
+        size = int(params.get(size_param, default_size))
+    except ValueError:
+        size = default_size
+    if size not in PAGE_SIZES:
+        size = default_size
+    paginator = Paginator(items, size)
+    page = paginator.get_page(params.get(page_param))
+    suffix = f"#{anchor}" if anchor else ""
+
+    def url(number):
+        query = params.copy()
+        query[page_param] = number
+        return f"?{query.urlencode()}{suffix}"
+
+    links = []
+    for number in paginator.get_elided_page_range(page.number, on_each_side=1, on_ends=1):
+        if number == Paginator.ELLIPSIS:
+            links.append({"gap": True})
+        else:
+            links.append({"number": number, "url": url(number), "current": number == page.number})
+    # The size picker resubmits every other filter and starts again at page 1.
+    hidden = [(key, value) for key, values in params.lists() if key not in (page_param, size_param)
+              for value in values]
+    pager = {
+        "page": page,
+        "links": links,
+        "prev_url": url(page.previous_page_number()) if page.has_previous() else "",
+        "next_url": url(page.next_page_number()) if page.has_next() else "",
+        "size": size,
+        "sizes": PAGE_SIZES,
+        "size_param": size_param,
+        "hidden": hidden,
+        "anchor": anchor,
+    }
+    return page, pager
 
 
 def _no_devices(request, lang):
@@ -138,19 +202,16 @@ def overview(request, lang):
     if ctx is None:
         return _no_devices(request, lang)
     devices = _module_devices(ctx, DeviceList.TYPE_PEOPLE)
-    ctx["people_devices"] = len(devices)
-    ctx["kpis"] = queries.kpis(devices, ctx["day"])
-    ctx["stale"] = _stale_alert(ctx, devices)
-    ctx["sections"] = [
-        {
-            **section,
-            "name": ctx["t"][f"module_{section['key']}"],
-            "summary": None if section.get("active") else queries.module_summary(
-                section["key"], ctx["toilet"], ctx["day"],
-            ),
-        }
-        for section in SECTIONS
-    ]
+    _sensor_context(ctx, devices)
+    ctx["kpis"] = queries.kpis(devices, ctx["start"], ctx["end"])
+    sections = []
+    for section in SECTIONS:
+        summary = None if section.get("active") else queries.module_summary(
+            section["key"], ctx["location"]["device_filter"], ctx["start"], ctx["end"],
+        )
+        sections.append({**section, "name": ctx["t"][f"module_{section['key']}"], "summary": summary})
+    ctx["sections"] = sections
+    ctx["active_modules"] = (1 if devices else 0) + sum(1 for s in sections if s["summary"] and s["summary"]["has_data"])
     return render(request, "dashboard/overview.html", ctx)
 
 
@@ -159,33 +220,57 @@ def people_counting(request, lang):
     ctx = _selection(request, lang)
     if ctx is None:
         return _no_devices(request, lang)
-    params = request.GET
-    devices, day = _module_devices(ctx, DeviceList.TYPE_PEOPLE, params.get("device", "")), ctx["day"]
-
-    recap_period = _recap_period(params)
-    wo_status = params.get("status", "")
-    if wo_status not in (queries.STATUS_SUCCESS, queries.STATUS_FAILED):
-        wo_status = ""
-    wo_from, wo_to = params.get("from", ""), params.get("to", "")
-    wo_page = Paginator(
-        queries.work_orders(devices, wo_status, _parse_local(wo_from), _parse_local(wo_to)), PAGE_SIZE
-    ).get_page(params.get("wo_page"))
-
+    devices = _module_devices(ctx, DeviceList.TYPE_PEOPLE)
+    start, end = ctx["start"], ctx["end"]
+    _sensor_context(ctx, devices)
     ctx.update(
         module_name=ctx["t"]["module_people"],
-        kpis=queries.kpis(devices, day),
-        stale=_stale_alert(ctx, devices),
-        chart=queries.hourly(devices, day),
-        recap=queries.recap(devices, day, recap_period),
-        recap_period=recap_period,
-        recap_days=queries.RECAP_DAYS,
-        recap_months=queries.RECAP_MONTHS,
-        wo_page=wo_page,
-        wo_rows=[{"log": log, "success": queries.is_success(log), "wo_number": queries.wo_number(log)}
-                 for log in wo_page],
-        wo_status=wo_status, wo_from=wo_from, wo_to=wo_to,
+        kpis=queries.kpis(devices, start, end),
+        chart=queries.hourly(devices, start, end),
     )
+    wo_page, ctx["wo_pager"] = _paginate(request, queries.work_orders(devices, start, end), "wo_",
+                                         PREVIEW_PAGE_SIZE, "notification-log")
+    ev_page, ctx["event_pager"] = _paginate(request, queries.events(devices, start, end), "ev_",
+                                            PREVIEW_PAGE_SIZE, "event-log")
+    ctx.update(wo_rows=[queries.work_order_row(log) for log in wo_page], event_rows=list(ev_page))
     return render(request, "dashboard/people_counting.html", ctx)
+
+
+@localized
+def people_counting_detail(request, lang):
+    # Detail tabs have their own date filters, defaulting per tab (recap 7 days, the rest 30).
+    params = request.GET
+    tab = params.get("tab") if params.get("tab") in DETAIL_TABS else "recap"
+    ctx = _selection(request, lang, default_preset=DETAIL_DEFAULT_RANGE[tab])
+    if ctx is None:
+        return _no_devices(request, lang)
+    devices = _module_devices(ctx, DeviceList.TYPE_PEOPLE, params.get("device", ""))
+    start, end = ctx["start"], ctx["end"]
+    ctx.update(module_name=ctx["t"]["module_people"], tab=tab)
+
+    if tab == "recap":
+        period = _recap_period(params)
+        rows, totals = queries.recap(devices, start, end, period)
+        recap_page, ctx["pager"] = _paginate(request, rows, anchor="table")
+        ctx.update(recap=list(recap_page), recap_totals=totals, recap_period=period,
+                   traffic=_label_days(queries.period_traffic(rows, start, end, period),
+                                       monthly=period == queries.RECAP_MONTHLY))
+    elif tab == "wo":
+        status = params.get("status", "")
+        if status not in (queries.STATUS_SUCCESS, queries.STATUS_FAILED):
+            status = ""
+        query = params.get("q", "").strip()
+        page, ctx["pager"] = _paginate(request, queries.work_orders(devices, start, end, status, query), anchor="table")
+        ctx.update(wo_rows=[queries.work_order_row(log) for log in page], wo_status=status, wo_query=query)
+    else:
+        time_from, time_to = parse_time(params.get("time_from") or ""), parse_time(params.get("time_to") or "")
+        event_type = params.get("event_type", "")
+        page, ctx["pager"] = _paginate(
+            request, queries.events(devices, start, end, time_from, time_to, event_type), anchor="table",
+        )
+        ctx.update(event_rows=list(page), event_types=queries.EVENT_LOG_TYPES,
+                   event_type=event_type, time_from=params.get("time_from", ""), time_to=params.get("time_to", ""))
+    return render(request, "dashboard/people_counting_detail.html", ctx)
 
 
 def _recap_period(params):
@@ -193,22 +278,46 @@ def _recap_period(params):
 
 
 @localized
-def export_recap(request, lang, fmt):
-    ctx = _selection(request, lang)
+def export(request, lang, kind, fmt):
+    """CSV/XLSX of the detail tab's data with the same filters as on screen."""
+    if kind not in DETAIL_TABS:
+        raise Http404
+    ctx = _selection(request, lang, default_preset=DETAIL_DEFAULT_RANGE[kind])
     if ctx is None:
-        return _no_devices(request, lang)
-    t = ctx["t"]
-    devices = _module_devices(ctx, DeviceList.TYPE_PEOPLE, request.GET.get("device", ""))
-    monthly = _recap_period(request.GET) == queries.RECAP_MONTHLY
-    data = tablib.Dataset(headers=[t["month"] if monthly else t["date"], t["visitors_in"], t["wo_sent"]])
-    for row in queries.recap(devices, ctx["day"], queries.RECAP_MONTHLY if monthly else queries.RECAP_DAILY):
-        data.append([row["period"].strftime("%Y-%m") if monthly else row["period"].isoformat(),
-                     row["people_in"], row["sent"]])
+        raise Http404
+    params, t = request.GET, ctx["t"]
+    devices = _module_devices(ctx, DeviceList.TYPE_PEOPLE, params.get("device", ""))
+    start, end = ctx["start"], ctx["end"]
 
-    # rekap-<periode>-<cakupan>-<tanggal>; the scope is the device name (falls back to its id).
+    if kind == "recap":
+        monthly = _recap_period(params) == queries.RECAP_MONTHLY
+        data = tablib.Dataset(headers=[t["month"] if monthly else t["date"], t["events_received"], t["visitors_in"],
+                                       t["wo_sent"], t["success"], t["failed"]])
+        rows, _ = queries.recap(devices, start, end, queries.RECAP_MONTHLY if monthly else queries.RECAP_DAILY)
+        for row in rows:
+            data.append([row["period"].strftime("%Y-%m") if monthly else row["period"].isoformat(),
+                         row["total"], row["people_in"], row["sent"], row["success"], row["failed"]])
+        prefix = f"{t['export_recap']}-{t['export_monthly'] if monthly else t['export_daily']}"
+    elif kind == "wo":
+        status = params.get("status", "")
+        data = tablib.Dataset(headers=[t["time"], t["wo_number"], t["device_id"], t["destination"], t["status"]])
+        for log in queries.work_orders(devices, start, end, status, params.get("q", "").strip()):
+            row = queries.work_order_row(log)
+            data.append([_local(log.time), row["wo_number"], log.device_id, row["destination"], log.response_status])
+        prefix = t["export_wo"]
+    else:
+        data = tablib.Dataset(headers=[t["time"], t["device_id"], t["event_id"], t["event_type"],
+                                       t["recognition_target"], t["counted"]])
+        logs = queries.events(devices, start, end, parse_time(params.get("time_from") or ""),
+                              parse_time(params.get("time_to") or ""), params.get("event_type", ""))
+        for log in logs:
+            data.append([_local(log.time), log.device_id, log.id, log.event_type,
+                         log.recognition_target, t["yes"] if log.counted else t["no"]])
+        prefix = t["export_events"]
+
+    # <jenis>-<cakupan>-<dari>-<sampai>; the scope is the device name (falls back to its id).
     scope = slugify(ctx["selected_device"].label) if ctx["selected_device"] else t["export_all_devices"]
-    period = t["export_monthly"] if monthly else t["export_daily"]
-    name = f"{t['export_recap']}-{period}-{scope}-{ctx['day']:%Y%m%d}"
+    name = f"{prefix}-{scope}-{start:%Y%m%d}-{end:%Y%m%d}"
     if fmt == "xlsx":
         response = HttpResponse(
             data.export("xlsx"),
@@ -219,3 +328,7 @@ def export_recap(request, lang, fmt):
         response = HttpResponse(data.export("csv"), content_type="text/csv; charset=utf-8")
     response["Content-Disposition"] = f'attachment; filename="{name}.{fmt}"'
     return response
+
+
+def _local(value):
+    return timezone.localtime(value).strftime("%Y-%m-%d %H:%M:%S")

@@ -1,0 +1,19 @@
+{% load dashboard_tags %}<div class="table-wrap">
+  <table>
+    <thead><tr><th>{{ t.time }}</th><th>{{ t.device_id }}</th><th>{{ t.event_id }}</th><th>{{ t.event_type }}</th><th>{{ t.recognition_target }}</th><th>{{ t.counted }}</th></tr></thead>
+    <tbody>
+      {% for e in event_rows %}
+      <tr>
+        <td class="nowrap">{{ e.time|date:"H:i:s" }} WIB<br><span class="muted small">{{ e.time|date:"D, d M Y" }}</span></td>
+        <td class="mono small">{{ e.device_id }}</td>
+        <td class="mono small">{{ e.id }}</td>
+        <td><span class="badge {% if e.event_type == 'in' %}badge--ok{% else %}badge--soon{% endif %}"><i class="dot"></i>{{ e.event_type }}</span></td>
+        <td>{{ e.recognition_target }}</td>
+        <td>{% if e.counted %}<span class="text-ok">{{ t.yes }}</span>{% else %}<span class="muted">{{ t.no }}</span>{% endif %}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="empty">{{ t.no_events }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

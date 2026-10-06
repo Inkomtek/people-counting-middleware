@@ -1,0 +1,1 @@
+{% if location.unassigned %}<input type="hidden" name="client" value="none">{% else %}{% for level, obj in location.selected.items %}{% if obj %}<input type="hidden" name="{{ level }}" value="{{ obj.pk }}">{% endif %}{% endfor %}{% endif %}

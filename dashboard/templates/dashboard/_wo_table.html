@@ -1,0 +1,18 @@
+{% load dashboard_tags %}<div class="table-wrap">
+  <table>
+    <thead><tr><th>{{ t.time }}</th><th>{{ t.wo_number }}</th><th>{{ t.device_id }}</th><th>{{ t.destination }}</th><th>{{ t.status }}</th></tr></thead>
+    <tbody>
+      {% for row in wo_rows %}
+      <tr>
+        <td class="nowrap">{{ row.log.time|date:"H:i:s" }} WIB<br><span class="muted small">{{ row.log.time|date:"D, d M Y" }}</span></td>
+        <td class="strong">{{ row.wo_number }}</td>
+        <td class="mono small">{{ row.log.device_id }}{% if row.log.device.name %}<br><span class="muted">{{ row.log.device.name }}</span>{% endif %}</td>
+        <td class="mono small">{{ row.destination }}</td>
+        <td><span class="badge {% if row.success %}badge--ok{% else %}badge--bad{% endif %}"><i class="dot"></i>{{ row.log.response_status }}</span></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="empty">{% if wo_status or wo_query %}{{ t.no_wo_filtered }}{% else %}{{ t.no_wo }}{% endif %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
