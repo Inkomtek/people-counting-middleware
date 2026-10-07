@@ -38,15 +38,17 @@
 \setlength{\headheight}{15pt}
 \pagestyle{fancy}
 \fancyhf{}
+% Footer text; build_washroom_api_pdf.sh can set another one (its second argument).
+\providecommand{\WashroomFooter}{DEMO KEY UNTUK TESTING}
 \fancyhead[L]{\footnotesize\sffamily\bfseries\color{WashroomTeal} WASHROOM API}
 \fancyhead[R]{\footnotesize\sffamily\color{WashroomMuted} PANDUAN INTEGRASI}
-\fancyfoot[L]{\footnotesize\sffamily\color{WashroomMuted} DEMO KEY UNTUK TESTING}
+\fancyfoot[L]{\footnotesize\sffamily\color{WashroomMuted} \WashroomFooter}
 \fancyfoot[R]{\footnotesize\sffamily\color{WashroomInk}\thepage}
 \renewcommand{\headrulewidth}{0.5pt}
 \renewcommand{\headrule}{\hbox to\headwidth{\color{WashroomRule}\leaders\hrule height \headrulewidth\hfill}}
 \fancypagestyle{plain}{%
   \fancyhf{}
-  \fancyfoot[L]{\footnotesize\sffamily\color{WashroomMuted} DEMO KEY UNTUK TESTING}
+  \fancyfoot[L]{\footnotesize\sffamily\color{WashroomMuted} \WashroomFooter}
   \fancyfoot[R]{\footnotesize\sffamily\color{WashroomInk}\thepage}
   \renewcommand{\headrulewidth}{0pt}
 }
