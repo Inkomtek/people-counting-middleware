@@ -268,7 +268,7 @@ class SendDummyDataCommandTests(TestCase):
     def run_command(self, *args):
         def post_through_test_client(url, json, headers, timeout):
             # Route the command's HTTP calls to the Django test client.
-            path = url.split("127.0.0.1:8000", 1)[1]
+            path = "/" + url.split("/", 3)[3]
             response = self.client.post(path, json, content_type="application/json",
                                         HTTP_X_API_KEY=headers["X-API-Key"])
             fake = mock.Mock(status_code=response.status_code, text=response.content.decode())
@@ -300,6 +300,14 @@ class SendDummyDataCommandTests(TestCase):
         self.assertEqual(devices.count(), 6)
         self.assertFalse(devices.exclude(scope=scope).exists())
         self.assertTrue(devices.filter(id=f"DUMMY-SOAP-S{scope.pk}").exists())
+
+    def test_default_base_url_prefers_docker_alias(self):
+        from washroom.management.commands import send_dummy_data as command
+
+        with mock.patch.object(command.socket, "gethostbyname", return_value="172.18.0.2"):
+            self.assertEqual(command.default_base_url(), "http://web.internal:8000")
+        with mock.patch.object(command.socket, "gethostbyname", side_effect=OSError):
+            self.assertEqual(command.default_base_url(), "http://127.0.0.1:8000")
 
     def test_unknown_scope_is_an_error(self):
         with self.assertRaises(CommandError):

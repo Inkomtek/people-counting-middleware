@@ -1,4 +1,5 @@
 import random
+import socket
 import uuid
 
 import requests
@@ -19,6 +20,18 @@ SCENARIOS = {
     "critical": {"dispenser": (0, 0), "trash": (90, 100), "ammonia": (25, 60)},
 }
 RATINGS = {"normal": (4, 5), "warning": (3, 4), "critical": (1, 2)}
+# Inside Docker the web container is reachable as web.internal, which every server must list in
+# DJANGO_ALLOWED_HOSTS (production does not allow 127.0.0.1); without Docker fall back to runserver.
+DOCKER_BASE_URL = "http://web.internal:8000"
+LOCAL_BASE_URL = "http://127.0.0.1:8000"
+
+
+def default_base_url():
+    try:
+        socket.gethostbyname("web.internal")
+    except OSError:
+        return LOCAL_BASE_URL
+    return DOCKER_BASE_URL
 
 
 class Command(BaseCommand):
@@ -30,7 +43,10 @@ class Command(BaseCommand):
     )
 
     def add_arguments(self, parser):
-        parser.add_argument("--base-url", default="http://127.0.0.1:8000", help="Server running the API")
+        parser.add_argument(
+            "--base-url",
+            help=f"Server running the API. Default: {DOCKER_BASE_URL} inside Docker, else {LOCAL_BASE_URL}",
+        )
         parser.add_argument(
             "--scope", type=int,
             help="Scope id of the toilet. Default: the Scope of the first people counter that has one",
@@ -48,6 +64,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         if options["cleanup"]:
             return self.cleanup()
+        options["base_url"] = options["base_url"] or default_base_url()
 
         toilet = self.toilet(options)
         client, _ = ApiClient.objects.get_or_create(name=DUMMY_CLIENT, defaults={"key_hash": "", "key_prefix": ""})
@@ -149,6 +166,13 @@ class Command(BaseCommand):
         self.stdout.write(f"POST {path:<20} -> HTTP {response.status_code}")
         if response.status_code != 201:
             self.stderr.write(response.text[:2000])
+            if response.status_code == 400 and "status" not in response.text[:200]:
+                # Not the API's own JSON error: Django rejected the Host (DJANGO_ALLOWED_HOSTS).
+                host = url.split("/")[2].split(":")[0]
+                self.stderr.write(
+                    f"The server rejected the host '{host}'. Add it to DJANGO_ALLOWED_HOSTS or pass "
+                    f"--base-url with an allowed host (in Docker: {DOCKER_BASE_URL})."
+                )
             return None
         return response.json()
 
