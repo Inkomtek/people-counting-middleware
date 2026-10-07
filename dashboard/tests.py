@@ -148,11 +148,20 @@ class DashboardTests(TestCase):
         response = self.client.get("/people-counting/detail/")
         self.assertEqual(response.context["tab"], "recap")
         totals = response.context["recap_totals"]
+        # "passby and in" is not an in/out event, so it is not counted as received.
         self.assertEqual((totals["total"], totals["people_in"], totals["sent"], totals["success"], totals["failed"]),
-                         (4, 2, 2, 1, 1))
+                         (3, 2, 2, 1, 1))
         self.assertContains(response, "Event Diterima")
         monthly = self.client.get("/people-counting/detail/", {"recap": "monthly"})
         self.assertEqual(monthly.context["recap"][0]["period"], timezone.localdate().replace(day=1))
+
+    def test_recap_events_received_counts_only_in_and_out(self):
+        for i, event_type in enumerate(["passby", "turnback", "out"]):
+            EventLog.objects.create(id=f"x{i}", time=timezone.localtime(), device=self.device, event_type=event_type)
+        totals = self.client.get("/people-counting/detail/").context["recap_totals"]
+        self.assertEqual(totals["total"], 4)  # in, in, out (setUp) + out
+        csv = self.client.get("/people-counting/detail/recap.csv").content.decode().splitlines()
+        self.assertEqual(csv[1].split(",")[1], "4")
 
     def test_detail_work_order_tab_filters(self):
         url = "/people-counting/detail/"

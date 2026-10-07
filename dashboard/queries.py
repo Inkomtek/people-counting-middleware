@@ -131,13 +131,14 @@ def hourly(devices, start, end):
 
 def recap(devices, start, end, period=RECAP_DAILY):
     """Per day or month in the range, newest first, only periods with activity:
-    events received, visitors in, Work Orders sent / succeeded / failed. Also returns the totals."""
+    events received (in/out only, like the Event Log), visitors in, Work Orders sent / succeeded /
+    failed. Also returns the totals."""
     since, until = range_bounds(start, end)
     tz = timezone.get_current_timezone()
     trunc = TruncMonth if period == RECAP_MONTHLY else TruncDate
 
     events = (
-        EventLog.objects.filter(device__in=devices, time__gte=since, time__lt=until)
+        EventLog.objects.filter(device__in=devices, time__gte=since, time__lt=until, event_type__in=EVENT_LOG_TYPES)
         .annotate(period=trunc("time", tzinfo=tz)).values("period")
         .annotate(total=Count("id"), people_in=Count("id", filter=COUNTED_EVENTS))
     )
