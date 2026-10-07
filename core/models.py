@@ -225,9 +225,10 @@ class NotificationLog(models.Model):
     head = models.JSONField(null=True, blank=True)
     response = models.JSONField(null=True, blank=True)
     response_status = models.CharField(max_length=50)
-    # Derived from response_status + response on every save (see work_order_outcome).
-    success = models.BooleanField(default=False, editable=False)
-    wo_number = models.CharField(max_length=100, blank=True, editable=False)
+    # Derived from response_status + response on every save (see work_order_outcome). The database
+    # defaults let a scheduler still running older code insert rows during a deploy instead of crashing.
+    success = models.BooleanField(default=False, db_default=False, editable=False)
+    wo_number = models.CharField(max_length=100, blank=True, default="", db_default="", editable=False)
 
     def __str__(self):
         return f"{self.response_status} - {self.time}"
