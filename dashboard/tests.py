@@ -55,47 +55,60 @@ class DashboardTests(TestCase):
         self.assertEqual((self.device.building, self.device.floor, self.device.gender),
                          ("GRAHA ISS BINTARO", "2", "male"))
 
-    def test_overview_is_public_and_shows_sections(self):
+    def test_overview_is_public_and_hides_types_without_devices(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Semua Lokasi")
-        self.assertContains(response, "Segera Hadir", count=6)
+        self.assertTrue(response.context["show_people"])
+        self.assertEqual(response.context["device_cards"], [])
+        self.assertNotContains(response, "Segera Hadir")
         self.assertEqual(response.context["kpis"]["people_in"], 2)
 
-    def test_overview_shows_sensor_data_for_selected_toilet(self):
-        soap = DeviceList.objects.create(id="soap-2-male", type="soap", name="Soap dispenser", scope=self.scope,
-                                         **LOCATION)
-        SensorReading.objects.create(
-            device=soap, time=timezone.localtime(), level=44, battery=92, condition="Terisi", severity="normal",
-        )
-        DeviceList.objects.create(id="soap-3-female", type="soap", scope=self.other_scope, **LOCATION)
+    def test_one_card_per_device_grouped_by_type(self):
+        soap_a = DeviceList.objects.create(id="soap-a", type="soap", name="Sabun A", scope=self.scope)
+        DeviceList.objects.create(id="soap-b", type="soap", name="Sabun B", scope=self.other_scope)
+        DeviceList.objects.create(id="trash-a", type="trash", name="Sampah A", scope=self.scope)
+        SensorReading.objects.create(device=soap_a, time=timezone.localtime(), level=44, battery=92,
+                                     condition="Terisi", severity="normal")
         response = self.client.get("/")
-        soap_section = next(section for section in response.context["sections"] if section["key"] == "soap")
-        self.assertTrue(soap_section["summary"]["has_data"])
-        self.assertEqual(soap_section["summary"]["latest"].level, 44)
-        self.assertContains(response, "44")
-        self.assertContains(response, "92%")
-        self.assertContains(response, 'aria-label="Baterai Soap dispenser"')
+        cards = response.context["device_cards"]
+        # One flowing grid ordered by type, then name; no per-type headings.
+        self.assertEqual([c["device"].id for c in cards], ["soap-a", "soap-b", "trash-a"])
+        self.assertNotContains(response, "group-title")
+        soap_cards = {card["device"].id: card for card in cards}
+        self.assertEqual(soap_cards["soap-a"]["latest"].level, 44)
+        self.assertEqual(soap_cards["soap-a"]["location"], "Gedung A · Floor 10 - Toilet Pria West")
+        self.assertFalse(soap_cards["soap-b"]["has_data"])
+        self.assertContains(response, 'aria-label="Baterai Sabun A"')
         self.assertContains(response, 'style="width: 92%"')
-        self.assertContains(response, "Soap dispenser")
-        self.assertContains(response, "Segera Hadir", count=5)
+        self.assertContains(response, "Menunggu data")
+        self.assertContains(response, "Gedung A · Floor 10 - Toilet Wanita West")
+        # Inside one toilet the location line is dropped.
+        scoped = self.client.get("/", {"scope": self.scope.pk})
+        self.assertEqual([c["device"].id for c in scoped.context["device_cards"]], ["soap-a", "trash-a"])
+        self.assertNotContains(scoped, "Gedung A · Floor 10 - Toilet Pria West</span>")
 
-    def test_overview_shows_customer_rating_summary(self):
-        feedback = DeviceList.objects.create(id="feedback-2-male", type="satisfaction", scope=self.scope, **LOCATION)
+    def test_satisfaction_card_per_device(self):
+        feedback = DeviceList.objects.create(id="fb-a", type="satisfaction", name="Tombol Rating A", scope=self.scope)
         CustomerResponse.objects.create(device=feedback, time=timezone.localtime(), rating=4, comment="Cukup bersih")
         CustomerResponse.objects.create(device=feedback, time=timezone.localtime(), rating=5, comment="Bersih")
         response = self.client.get("/")
-        section = next(section for section in response.context["sections"] if section["key"] == "satisfaction")
-        self.assertTrue(section["summary"]["has_data"])
-        self.assertEqual(section["summary"]["average_rating"], 4.5)
-        self.assertEqual(section["summary"]["rating_progress"], 90)
-        self.assertContains(response, "4.5")
-        self.assertContains(response, "90%")
+        card = response.context["device_cards"][0]
+        self.assertEqual((card["device"].label, card["average_rating"], card["response_count"], card["rating_progress"]),
+                         ("Tombol Rating A", 4.5, 2, 90))
         self.assertContains(response, "Rating terakhir: 5/5")
-        self.assertContains(response, "Bersih")
         self.assertContains(response, "2 rating")
 
-    # ---------- people counting overview ----------
+    def test_device_cards_are_paginated(self):
+        DeviceList.objects.bulk_create([
+            DeviceList(id=f"soap-{i:02d}", type="soap", scope=self.scope) for i in range(25)
+        ])
+        response = self.client.get("/")
+        self.assertEqual(len(response.context["device_cards"]), 20)
+        self.assertEqual(response.context["device_pager"]["page"].paginator.count, 25)
+        page2 = self.client.get("/", {"dev_page": "2"})
+        self.assertEqual(len(page2.context["device_cards"]), 5)
+        self.assertTrue(page2.context["show_people"])  # the people card shows on every page
+
     def test_people_counting_overview(self):
         response = self.client.get("/people-counting/")
         self.assertEqual(response.status_code, 200)
@@ -322,6 +335,17 @@ class DashboardTests(TestCase):
         self.assertEqual(by_scope.context["kpis"]["people_in"], 5)
         self.assertIn(f"scope={self.other_scope.pk}", by_scope.context["filter_query"])
 
+    def test_choosing_all_resets_the_levels_below(self):
+        scope, area, site = self.scope, self.area, self.site
+        full = {"client": site.client.pk, "region": site.region.pk, "site": site.pk, "area": area.pk, "scope": scope.pk}
+        # The form still submits the lower levels after "Semua" is chosen higher up; "all" must win.
+        self.assertEqual(self.title(**{**full, "client": "all"}), (None, []))
+        self.assertEqual(self.title(**{**full, "region": "all"}), ("BCA", []))
+        self.assertEqual(self.title(**{**full, "site": "all"}), ("Jakarta", ["BCA"]))
+        self.assertEqual(self.title(**{**full, "area": "all"}), ("Thamrin", ["BCA", "Jakarta"]))
+        self.assertEqual(self.title(**{**full, "scope": "all"}), ("Gedung A", ["BCA", "Jakarta", "Thamrin"]))
+        self.assertContains(self.client.get("/"), "data-location-level")
+
     def test_unknown_scope_is_ignored(self):
         self.assertEqual(self.title(scope="99999"), (None, []))
         self.assertEqual(self.title(area=self.area.pk, scope="99999")[0], "Gedung A")
@@ -348,6 +372,26 @@ class DashboardTests(TestCase):
         # "All locations" includes devices without a Scope.
         self.assertEqual(self.client.get("/").context["kpis"]["people_in"], 5)
 
+    # ---------- overview: device lists, sensor filter, ids, total ----------
+    def test_sensor_type_filter_and_total_devices(self):
+        DeviceList.objects.create(id="soap-a", type="soap", scope=self.scope)
+        DeviceList.objects.create(id="trash-a", type="trash", scope=self.scope)
+        everything = self.client.get("/")
+        self.assertEqual([c["type"] for c in everything.context["device_cards"]], ["soap", "trash"])
+        self.assertEqual(everything.context["total_devices"], 3)
+        self.assertNotContains(everything, "jenis sensor aktif")
+        self.assertContains(everything, "Total perangkat: 3")
+        soap_only = self.client.get("/", {"sensor": "soap"})
+        self.assertEqual([c["type"] for c in soap_only.context["device_cards"]], ["soap"])
+        self.assertFalse(soap_only.context["show_people"])
+        self.assertEqual(soap_only.context["total_devices"], 1)
+        self.assertIn("sensor=soap", soap_only.context["filter_query"])
+        self.assertEqual(len(self.client.get("/", {"sensor": "bogus"}).context["device_cards"]), 2)
+
+    def test_people_counting_ids_only_when_scope_selected(self):
+        self.assertNotContains(self.client.get("/"), f"ID {DEVICE_ID}")
+        self.assertContains(self.client.get("/", {"scope": self.scope.pk}), f"ID {DEVICE_ID}")
+
     # ---------- auto-refresh ----------
     def test_refresh_interval_comes_from_scheduler_config(self):
         config = SchedulerConfig.get()
@@ -367,6 +411,13 @@ class DashboardTests(TestCase):
         self.assertIsNone(self.client.get("/").context["stale"])
         yesterday = (timezone.localdate() - timedelta(days=1)).isoformat()
         self.assertIsNone(self.client.get("/", {"start": yesterday, "end": yesterday}).context["stale"])
+
+    def test_hourly_axis_ticks_are_split_from_the_peak(self):
+        response = self.client.get("/people-counting/")
+        ticks = response.context["chart"]["ticks"]
+        self.assertEqual([t["value"] for t in ticks], [0, 0, 1, 2, 2])  # peak 2 split in four
+        self.assertEqual([t["pct"] for t in ticks], ["0", "22", "44", "66", "88"])
+        self.assertContains(response, 'style="--p: 22"')  # never "22,0" (invalid CSS)
 
     def test_busiest_hour(self):
         chart = self.client.get("/people-counting/").context["chart"]
@@ -394,7 +445,7 @@ class DashboardTests(TestCase):
         self.assertEqual(response.cookies["wd_lang"].value, "en")
         follow_up = self.client.get("/")
         self.assertContains(follow_up, "Sensor summary")
-        self.assertContains(follow_up, "Coming Soon")
+        self.assertContains(follow_up, "Total devices:")
 
     def test_english_export(self):
         self.client.cookies["wd_lang"] = "en"
@@ -418,6 +469,10 @@ class DashboardTests(TestCase):
         response = self.client.get("/")
         self.assertNotContains(response, "fonts.googleapis.com")
         self.assertContains(response, "favicon.svg")
+
+    def test_no_template_comments_leak_into_pages(self):
+        for url in ("/", "/people-counting/", "/people-counting/detail/", "/people-counting/detail/?tab=events"):
+            self.assertNotContains(self.client.get(url), "{#", msg_prefix=url)
 
 
 class SyncScopeTests(TestCase):

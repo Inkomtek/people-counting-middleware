@@ -52,6 +52,7 @@
       {% if location.selected.region %}{% include "dashboard/_location_select.html" with name="site" label=t.site choices=location.choices.site selected=location.selected.site %}{% endif %}
       {% if location.selected.site %}{% include "dashboard/_location_select.html" with name="area" label=t.area choices=location.choices.area selected=location.selected.area %}{% endif %}
       {% if location.selected.area %}{% include "dashboard/_location_select.html" with name="scope" label=t.scope choices=location.choices.scope selected=location.selected.scope %}{% endif %}
+      {% block type_filter %}{% endblock %}
       {% block date_filters %}
       <label class="field"><span>{{ t.date_from }}</span>
         <input type="date" name="start" value="{{ start|date:'Y-m-d' }}" max="{% now 'Y-m-d' %}" onchange="this.form.submit()">

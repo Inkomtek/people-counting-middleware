@@ -19,9 +19,9 @@ from . import i18n, locations, queries
 PAGE_SIZES = (10, 20, 50, 100)
 DETAIL_PAGE_SIZE = 20
 PREVIEW_PAGE_SIZE = 10
-# Overview cards, in display order; the name comes from i18n ("module_<key>").
+# Sensor types in display order (overview groups, "Jenis Sensor" filter); names come from i18n ("module_<key>").
 SECTIONS = [
-    {"key": "people", "icon": "people", "active": True},
+    {"key": "people", "icon": "people"},
     {"key": "satisfaction", "icon": "smile"},
     {"key": "soap", "icon": "soap"},
     {"key": "toilet-paper", "icon": "paper"},
@@ -204,14 +204,37 @@ def overview(request, lang):
     devices = _module_devices(ctx, DeviceList.TYPE_PEOPLE)
     _sensor_context(ctx, devices)
     ctx["kpis"] = queries.kpis(devices, ctx["start"], ctx["end"])
-    sections = []
-    for section in SECTIONS:
-        summary = None if section.get("active") else queries.module_summary(
-            section["key"], ctx["location"]["device_filter"], ctx["start"], ctx["end"],
-        )
-        sections.append({**section, "name": ctx["t"][f"module_{section['key']}"], "summary": summary})
-    ctx["sections"] = sections
-    ctx["active_modules"] = (1 if devices else 0) + sum(1 for s in sections if s["summary"] and s["summary"]["has_data"])
+    device_filter = ctx["location"]["device_filter"]
+    t = ctx["t"]
+
+    # "Jenis Sensor" filter: one module or all; kept in the links that change location or dates.
+    sensor = request.GET.get("sensor", "")
+    if sensor not in {section["key"] for section in SECTIONS}:
+        sensor = ""
+    if sensor:
+        ctx["location_query"] += f"&sensor={sensor}"
+        ctx["filter_query"] += f"&sensor={sensor}"
+    types = [section["key"] for section in SECTIONS if not sensor or section["key"] == sensor]
+
+    # People counting stays one combined card shown first; every other sensor gets its own card in the
+    # same grid (ordered by type, then name) and is paginated. Types without devices are not shown.
+    cards = queries.device_cards(device_filter, ctx["start"], ctx["end"], types)
+    page, pager = _paginate(request, cards, "dev_", DETAIL_PAGE_SIZE, "devices")
+    icons = {section["key"]: section["icon"] for section in SECTIONS}
+    for card in page:
+        card["icon"] = icons[card["type"]]
+    total = DeviceList.objects.filter(**device_filter)
+    ctx.update(
+        sensor=sensor,
+        sensor_options=[(section["key"], t[f"module_{section['key']}"]) for section in SECTIONS],
+        show_people=DeviceList.TYPE_PEOPLE in types and bool(devices),
+        people_name=t["module_people"],
+        device_cards=list(page),
+        device_pager=pager,
+        total_devices=(total.filter(type=sensor) if sensor else total).count(),
+        # Inside one toilet the cards drop the location line (the title already names it).
+        scope_selected=ctx["location"]["selected"]["scope"] is not None,
+    )
     return render(request, "dashboard/overview.html", ctx)
 
 

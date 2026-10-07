@@ -36,8 +36,14 @@ def _chain(obj, level):
 
 
 def _select(params):
-    """Deepest level whose object agrees with every level given above it."""
-    given = {level: _lookup(level, params.get(level)) for level in LEVELS}
+    """Deepest level whose object agrees with every level given above it. A level set to "all"
+    ignores every level below it, so picking "Semua" higher up always wins over stale lower values."""
+    given = {}
+    for level in LEVELS:
+        if params.get(level) == ALL:
+            given.update(dict.fromkeys(LEVELS[LEVELS.index(level):]))
+            break
+        given[level] = _lookup(level, params.get(level))
     for level in ("scope", "area", "site"):
         if given[level]:
             chain = _chain(given[level], level)

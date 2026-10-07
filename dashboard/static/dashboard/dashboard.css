@@ -178,7 +178,8 @@ h1, h2 { margin: 0; letter-spacing: -.01em; }
 .bar-area { position: relative; flex: 1; display: flex; align-items: flex-end; justify-content: center; }
 .bar { width: 100%; max-width: 22px; min-height: 2px; background: var(--accent); border-radius: 6px 6px 2px 2px; }
 .bar-col:hover .bar { filter: brightness(1.15); }
-.bar-wo { position: absolute; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--wo); }
+.bar-wo { position: absolute; left: 50%; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: var(--wo);
+  box-shadow: 0 0 0 2px var(--surface); }
 .bar-label { height: 22px; line-height: 22px; text-align: center; font-size: 10.5px; color: var(--muted); }
 
 /* ---------- tables ---------- */
@@ -333,3 +334,32 @@ tbody tr:last-child td { border-bottom: 0; }
 :root[data-theme="dark"] .btn.is-current { color: #0b1220; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .btn.is-current { color: #0b1220; } }
 .pager-gap { padding: 0 2px; color: var(--muted); }
+
+/* ---------- overview: device lists, sensor ids, total ---------- */
+.section-meta { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.device-list { list-style: none; margin: 4px 0 0; padding: 10px 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.device-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; }
+.device-row .truncate { max-width: none; flex: 1; min-width: 0; }
+.device-value { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 13px; }
+.sensor-ids { list-style: none; margin: 0; padding: 0; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
+.sensor-ids .mono { font-size: 11.5px; }
+.device-list li { display: flex; flex-direction: column; gap: 2px; }
+.device-list li + li { padding-top: 8px; border-top: 1px dashed var(--border); }
+.device-list .truncate { display: block; max-width: 100%; }
+
+/* ---------- overview: one card per device ---------- */
+.device-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.device-title .truncate { display: block; max-width: 100%; }
+.section--waiting { opacity: .8; }
+#devices { display: flex; flex-direction: column; gap: 20px; }
+#devices:empty { display: none; }
+
+/* Hourly chart: axis labels and gridlines at the same heights as the bar values (--p = % of the plot,
+   the plot being the chart minus the 22px hour-label row). */
+.chart-scale--ticks { position: relative; display: block; padding: 0; min-width: 28px; }
+.chart-scale--ticks span { position: absolute; right: 0; bottom: calc(22px + (100% - 22px) * var(--p) / 100); transform: translateY(50%); line-height: 1; }
+.chart-bars--ticks { position: relative; background: none; }
+.chart-grid { position: absolute; inset: 0; pointer-events: none; }
+.chart-grid span { position: absolute; left: 0; right: 0; bottom: calc(22px + (100% - 22px) * var(--p) / 100); border-top: 1px dashed var(--border); }
+.chart-grid span:first-child { border-top-style: solid; }
+.chart-bars--ticks .bar-col { position: relative; z-index: 1; }

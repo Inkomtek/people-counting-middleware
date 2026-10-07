@@ -18,6 +18,16 @@
     try { localStorage.setItem("wd-theme", root.dataset.theme); } catch (e) {}
   });
 
+  // ---------- location filter ----------
+  // Changing Client/Region/Site/Area/Scope resets every level below it to "all" before the form submits
+  // (capture phase, so it runs before the select's own onchange submit).
+  document.addEventListener("change", function (event) {
+    var select = event.target.closest("[data-location-level]");
+    if (!select) return;
+    var levels = Array.prototype.slice.call(select.form.querySelectorAll("[data-location-level]"));
+    levels.slice(levels.indexOf(select) + 1).forEach(function (lower) { lower.value = "all"; });
+  }, true);
+
   // ---------- auto-refresh ----------
   // Every `data-refresh-seconds` (set in Admin > Scheduler config) re-fetch this page and swap in the
   // regions below, keeping scroll position and open controls. Failed fetches show a banner and back off.

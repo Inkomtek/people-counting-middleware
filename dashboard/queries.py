@@ -97,6 +97,10 @@ def kpis(devices, start, end):
     }
 
 
+CHART_TOP = 88
+CHART_TICKS = 4
+
+
 def hourly(devices, start, end):
     """IN events per hour of day (0-23) summed over the range, and whether a Work Order fired then."""
     since, until = range_bounds(start, end)
@@ -115,6 +119,13 @@ def hourly(devices, start, end):
     return {
         "peak": peak,
         "busiest_hour": busiest,
+        # Axis labels split evenly from 0 to the peak, placed where the bars put those values
+        # (bars use at most CHART_TOP % of the height so the notification dot fits above the tallest).
+        "ticks": [
+            # pct as a string: templates localize floats ("22,0" in Indonesian), which is invalid CSS.
+            {"value": round(peak * i / CHART_TICKS), "pct": f"{CHART_TOP * i / CHART_TICKS:g}"}
+            for i in range(CHART_TICKS + 1)
+        ] if peak else [],
         "bars": [
             {
                 "hour": hour,
@@ -240,36 +251,46 @@ def events(devices, start, end, time_from=None, time_to=None, event_type=""):
 
 # ---------- other modules (washroom API data) ----------
 
-def module_summary(module, device_filter, start, end):
-    """Latest sensor reading, or the satisfaction average, for one module at one toilet in the range.
-    `device_filter` selects the toilet's devices (see locations.resolve)."""
-    devices = DeviceList.objects.filter(type=module, **device_filter)
-    since, until = range_bounds(start, end)
-    summary = {"has_data": False, "device_count": devices.count()}
-
-    if module == SATISFACTION_TYPE:
-        responses = CustomerResponse.objects.filter(device__in=devices, time__gte=since, time__lt=until)
-        stats = responses.aggregate(average=Avg("rating"), count=Count("id"))
-        if stats["count"]:
-            latest = responses.select_related("device").order_by("-time", "-id").first()
-            summary.update(
-                has_data=True,
-                average_rating=stats["average"],
-                rating_progress=round(stats["average"] * 20),
-                response_count=stats["count"],
-                latest=latest,
-            )
-        return summary
-
-    latest = (
-        SensorReading.objects.filter(device__in=devices, time__gte=since, time__lt=until)
-        .select_related("device").order_by("-time", "-id").first()
+def device_cards(device_filter, start, end, types):
+    """One overview card per washroom sensor (every type in `types` except people counting), ordered by
+    type then name: latest reading in the range, or the rating summary for satisfaction devices.
+    `device_filter` selects the location's devices (see locations.resolve)."""
+    order = {key: index for index, key in enumerate(types)}
+    devices = sorted(
+        DeviceList.objects.filter(type__in=types, **device_filter).exclude(type=DeviceList.TYPE_PEOPLE)
+        .select_related("scope__area"),
+        key=lambda d: (order[d.type], d.name or d.id, d.id),
     )
-    if latest:
-        summary.update(
-            has_data=True,
-            latest=latest,
-            level_progress=(max(0, min(round(latest.level), 100))
-                            if latest.level is not None and module != "ammonia" else None),
-        )
-    return summary
+    since, until = range_bounds(start, end)
+    readings = SensorReading.objects.filter(device__in=devices, time__gte=since, time__lt=until)
+    # Latest reading / response per device in the range (PostgreSQL DISTINCT ON).
+    last_reading = {r.device_id: r for r in readings.order_by("device_id", "-time", "-id").distinct("device_id")}
+    responses = CustomerResponse.objects.filter(device__in=devices, time__gte=since, time__lt=until)
+    last_response = {r.device_id: r for r in responses.order_by("device_id", "-time", "-id").distinct("device_id")}
+    ratings = {row.pop("device"): row for row in responses.values("device")
+               .annotate(average=Avg("rating"), count=Count("id"))}
+
+    cards = []
+    for device in devices:
+        card = {"device": device, "type": device.type, "location": _location_label(device), "has_data": False}
+        if device.type == SATISFACTION_TYPE:
+            stats = ratings.get(device.id)
+            if stats:
+                card.update(has_data=True, average_rating=stats["average"], response_count=stats["count"],
+                            rating_progress=round(stats["average"] * 20), latest=last_response[device.id])
+        else:
+            reading = last_reading.get(device.id)
+            if reading:
+                card.update(
+                    has_data=True, latest=reading,
+                    level_progress=(max(0, min(round(reading.level), 100))
+                                    if reading.level is not None and device.type != "ammonia" else None),
+                )
+        cards.append(card)
+    return cards
+
+
+def _location_label(device):
+    """"Area · Scope" of a device, or None when it has no Scope."""
+    scope = device.scope
+    return f"{scope.area.name} · {scope.name}" if scope else None

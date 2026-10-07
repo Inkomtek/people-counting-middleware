@@ -2,100 +2,54 @@
 {% load humanize dashboard_tags %}
 {% block title %}{{ t.overview }}{% endblock %}
 
+{% block type_filter %}
+<label class="field"><span>{{ t.sensor_type }}</span>
+  <select name="sensor" onchange="this.form.submit()">
+    <option value="">{{ t.all_types }}</option>
+    {% for key, label in sensor_options %}<option value="{{ key }}"{% if key == sensor %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+</label>
+{% endblock %}
+
 {% block content %}
 <div class="section-title">
   <h2>{{ t.sensor_summary }}</h2>
-  <span class="muted small">{{ t.period_label }} {% include "dashboard/_period.html" %} · {% tr "active_modules" n=active_modules total=sections|length %}</span>
+  <span class="section-meta">
+    <span class="muted small">{{ t.period_label }} {% include "dashboard/_period.html" %}</span>
+    <span class="chip">{% tr "total_devices" n=total_devices|intcomma %}</span>
+  </span>
 </div>
-<div class="bento">
-  {% for s in sections %}
-  {% if s.active %}
-  <a class="card section section--people" href="{% url 'dashboard:people_counting' %}?{{ filter_query }}">
-    <div class="section-head">
-      <span class="section-icon">{% include "dashboard/_icon.html" with name=s.icon %}</span>
-      {% if sensors %}<span class="badge {% if online_count == sensors|length %}badge--ok{% else %}badge--warn{% endif %}"><i class="dot"></i>{% tr "n_online" n=online_count total=sensors|length %}</span>{% endif %}
-    </div>
-    <h2 class="section-name">{{ s.name }}</h2>
-    <div class="section-metric section-metric--stack">
-      <span class="metric">{{ kpis.people_in|intcomma }}</span>
-      <span class="metric-label">{% if is_today %}{{ t.visitors_in_today_card }}{% else %}{{ t.visitors_in_range_card }} · {% include "dashboard/_period.html" %}{% endif %}</span>
-    </div>
-    <div class="section-foot">
-      <span class="muted">{{ t.notifications_sent }}</span>
-      <span>{% tr "n_success_failed" n=kpis.wo_sent|intcomma s=kpis.wo_success|intcomma f=kpis.wo_failed|intcomma %}</span>
-    </div>
-  </a>
-  {% else %}
-    {% if s.summary.has_data %}
-    <div class="card section section--module">
+
+<div id="devices">
+  <div class="bento">
+    {% if show_people %}
+    <a class="card section section--people" href="{% url 'dashboard:people_counting' %}?{{ filter_query }}">
       <div class="section-head">
-        <span class="section-icon">{% include "dashboard/_icon.html" with name=s.icon %}</span>
-        <span class="badge badge--ok">{{ t.data_available }}</span>
+        <span class="section-icon">{% include "dashboard/_icon.html" with name="people" %}</span>
+        <span class="badge {% if online_count == sensors|length %}badge--ok{% else %}badge--warn{% endif %}"><i class="dot"></i>{% tr "n_online" n=online_count total=sensors|length %}</span>
       </div>
-      <h2 class="section-name">{{ s.name }}</h2>
-      {% if s.key == "satisfaction" %}
-      <div class="module-readout">
-        <span class="metric">{{ s.summary.average_rating|floatformat:1 }}<small>/ 5</small></span>
-        <span class="metric-label">{% tr "average_ratings" n=s.summary.response_count|intcomma %}</span>
+      <h2 class="section-name">{{ people_name }}</h2>
+      <div class="section-metric section-metric--stack">
+        <span class="metric">{{ kpis.people_in|intcomma }}</span>
+        <span class="metric-label">{% if is_today %}{{ t.visitors_in_today_card }}{% else %}{{ t.visitors_in_range_card }} · {% include "dashboard/_period.html" %}{% endif %}</span>
       </div>
-      <div class="module-meter">
-        <div class="module-meter-head"><span>{{ t.satisfaction }}</span><span class="badge badge--ok">{{ s.summary.rating_progress }}%</span></div>
-        <div class="progress" role="progressbar" aria-valuenow="{{ s.summary.rating_progress }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ t.avg_satisfaction }}">
-          <span style="width: {{ s.summary.rating_progress }}%"></span>
-        </div>
-      </div>
-      <div class="module-meta">
-        <span class="truncate">{{ s.summary.latest.device.label }}</span>
-        <span>{% tr "last_at" time=s.summary.latest.time|date:"H:i" %}</span>
-      </div>
-      <div class="module-feedback">
-        <strong>{% tr "last_rating" n=s.summary.latest.rating %}</strong>
-        <span>{{ s.summary.latest.comment|default:t.no_comment }}</span>
-      </div>
-      {% else %}
-      <div class="module-readout">
-        <span class="metric">{% if s.summary.latest.level is None %}—{% else %}{{ s.summary.latest.level|floatformat:"-1" }}{% endif %}<small>{% if s.key == "ammonia" %}ppm{% else %}%{% endif %}</small></span>
-        <span class="metric-label">{{ s.summary.latest.condition|default:t.condition_unknown }}</span>
-      </div>
-      {% if s.key != "ammonia" and s.summary.latest.level is not None %}
-      <div class="module-meter">
-        <div class="module-meter-head"><span>{{ t.level }}</span><span class="badge badge--soon">{{ s.summary.latest.level|floatformat:"-1" }}%</span></div>
-        <div class="progress" role="progressbar" aria-valuenow="{{ s.summary.level_progress }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ t.level }} {{ s.name }}">
-          <span style="width: {{ s.summary.level_progress }}%"></span>
-        </div>
-      </div>
-      {% elif s.key == "ammonia" and s.summary.latest.level is not None %}
-      <div class="module-meter-head"><span>{{ t.concentration }}</span><span class="badge badge--soon">{{ s.summary.latest.level|floatformat:"-1" }} ppm</span></div>
-      {% else %}
-      <span class="module-meta">{{ t.level_not_sent }}</span>
+      {% if scope_selected %}
+      <ul class="sensor-ids small">
+        {% for s in sensors %}<li>{% if s.device.name %}<span>{{ s.device.name }}</span> · {% endif %}<span class="mono">ID {{ s.device.id }}</span></li>{% endfor %}
+      </ul>
       {% endif %}
-      <div class="module-meter">
-        {% if s.summary.latest.battery is not None %}
-        <div class="module-meter-head"><span>{{ t.battery }}</span><span class="badge badge--ok">{{ s.summary.latest.battery }}%</span></div>
-        <div class="progress" role="progressbar" aria-valuenow="{{ s.summary.latest.battery }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ t.battery }} {{ s.summary.latest.device.label }}">
-          <span style="width: {{ s.summary.latest.battery }}%"></span>
-        </div>
-        {% else %}
-        <div class="module-meter-head"><span>{{ t.battery }}</span><span class="muted">{{ t.not_sent }}</span></div>
-        {% endif %}
+      <div class="section-foot">
+        <span class="muted">{{ t.notifications_sent }}</span>
+        <span>{% tr "n_success_failed" n=kpis.wo_sent|intcomma s=kpis.wo_success|intcomma f=kpis.wo_failed|intcomma %}</span>
       </div>
-      <div class="module-meta">
-        <span class="truncate">{{ s.summary.latest.device.label }}</span>
-        <span>{% tr "last_at" time=s.summary.latest.time|date:"H:i" %}</span>
-      </div>
-      {% endif %}
-    </div>
-    {% else %}
-    <div class="card section section--soon" aria-disabled="true">
-      <div class="section-head">
-        <span class="section-icon">{% include "dashboard/_icon.html" with name=s.icon %}</span>
-        <span class="badge badge--soon">{% if s.summary.device_count %}{{ t.waiting_data }}{% else %}{{ t.coming_soon }}{% endif %}</span>
-      </div>
-      <h2 class="section-name">{{ s.name }}</h2>
-      <span class="metric metric--empty">—</span>
-    </div>
+    </a>
     {% endif %}
-  {% endif %}
-  {% endfor %}
+    {% for card in device_cards %}{% include "dashboard/_device_card.html" %}{% endfor %}
+  </div>
+  {% include "dashboard/_pager.html" with pager=device_pager %}
 </div>
+
+{% if not show_people and not device_cards %}
+<div class="card empty">{{ t.no_data }}</div>
+{% endif %}
 {% endblock %}

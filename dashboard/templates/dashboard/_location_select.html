@@ -1,6 +1,7 @@
-{# One level of the Client/Region/Site/Area/Scope filter. "Semua" (all) stops the selection at the level above. #}
+{% comment %}One level of the Client/Region/Site/Area/Scope filter. "Semua" (all) stops the selection at the level above;
+changing a level resets every level below it to "Semua" (dashboard.js).{% endcomment %}
 <label class="field"><span>{{ label }}</span>
-  <select name="{{ name }}" onchange="this.form.submit()">
+  <select name="{{ name }}" data-location-level onchange="this.form.submit()">
     <option value="all"{% if not selected and not location.unassigned %} selected{% endif %}>{{ t.all }}</option>
     {% for choice in choices %}<option value="{{ choice.pk }}"{% if choice == selected %} selected{% endif %}>{{ choice.name }}</option>{% endfor %}
     {% if name == "client" and location.has_unassigned %}<option value="none"{% if location.unassigned %} selected{% endif %}>{{ t.unassigned }}</option>{% endif %}

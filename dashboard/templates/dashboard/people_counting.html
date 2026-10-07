@@ -78,13 +78,17 @@
   </div>
   {% if chart.peak %}
   <div class="chart" role="img" aria-label="{% tr 'chart_label' n=chart.peak|intcomma %}">
-    <div class="chart-scale small muted"><span>{{ chart.peak|intcomma }}</span><span>0</span></div>
-    <div class="chart-bars">
+    <div class="chart-scale chart-scale--ticks small muted" aria-hidden="true">
+      {% for tick in chart.ticks %}<span style="--p: {{ tick.pct }}">{{ tick.value|intcomma }}</span>{% endfor %}
+    </div>
+    <div class="chart-bars chart-bars--ticks">
+      <div class="chart-grid" aria-hidden="true">{% for tick in chart.ticks %}<span style="--p: {{ tick.pct }}"></span>{% endfor %}</div>
       {% for b in chart.bars %}
       <div class="bar-col{% if b.hour == chart.busiest_hour %} bar-col--peak{% endif %}" title="{% with h=b.hour|stringformat:'02d' %}{% tr 'bar_title' hour=h|add:':00' n=b.count|intcomma %}{% endwith %}{% if b.wo %} · {{ t.legend_wo }}{% endif %}">
         <div class="bar-area">
-          {% if b.wo %}<i class="bar-wo"></i>{% endif %}
-          <span class="bar" style="height: {{ b.pct }}%"></span>
+          {# Bars use at most 88% of the height (queries.CHART_TOP) so the notification dot always fits above the tallest. #}
+          <span class="bar" style="height: calc({{ b.pct }}% * 0.88)"></span>
+          {% if b.wo %}<i class="bar-wo" style="bottom: calc({{ b.pct }}% * 0.88 + 6px)"></i>{% endif %}
         </div>
         <span class="bar-label">{{ b.hour|stringformat:"02d" }}</span>
       </div>

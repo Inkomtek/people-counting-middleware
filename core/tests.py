@@ -435,10 +435,21 @@ class SeedLocationsCommandTests(TestCase):
         self.run_command("--demo")
         self.assertEqual(sorted(Client.objects.values_list("name", flat=True)), ["BCA", "ISS", "Mandiri"])
         self.assertEqual(Scope.objects.count(), 4)
+        from washroom.models import CustomerResponse, SensorReading
+
+        # 3 demo toilets x (5 reading sensors + 1 satisfaction).
+        self.assertEqual(DeviceList.objects.filter(id__startswith="DEMO-").count(), 18)
+        self.assertEqual(SensorReading.objects.count(), 15)
+        self.assertEqual(CustomerResponse.objects.count(), 30)
+        self.assertTrue(SensorReading.objects.exclude(severity="").exists())
+        self.run_command("--demo")  # devices are reused
+        self.assertEqual(DeviceList.objects.filter(id__startswith="DEMO-").count(), 18)
         demo_device = DeviceList.objects.create(id="demo-dev", scope=Scope.objects.get(name="Lobby - Toilet Pria"))
         self.run_command("--cleanup-demo")
         self.assertEqual(list(Client.objects.values_list("name", flat=True)), ["ISS"])
         self.assertEqual(list(Region.objects.values_list("name", flat=True)), ["Banten"])
+        self.assertFalse(DeviceList.objects.filter(id__startswith="DEMO-").exists())
+        self.assertFalse(SensorReading.objects.exists())
         demo_device.refresh_from_db()
         self.assertIsNone(demo_device.scope)  # device kept, back to "unassigned"
         self.assertIsNotNone(DeviceList.objects.get(id="2069691213314072577").scope)
