@@ -1,0 +1,6 @@
+{% load humanize dashboard_tags %}{# Status counts of one sensor type (`b` from sensor_summary); each links to All Sensors filtered to it. #}
+<ul class="status-legend{% if inline %} status-legend--inline{% endif %} small">
+  {% for s in b.statuses %}{% if s.count or s.status != "nodata" %}
+  <li><a href="?{{ summary_query }}&sensor={{ type }}&status={{ s.status }}#all-sensors"><i class="status-dot status-{{ s.status }}"></i><span>{% if s.label and s.status != "nodata" %}{{ s.label }}{% else %}{% tr "status_"|add:s.status %}{% endif %}</span><strong>{{ s.count|intcomma }}</strong></a></li>
+  {% endif %}{% endfor %}
+</ul>

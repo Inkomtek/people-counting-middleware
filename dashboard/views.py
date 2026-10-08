@@ -1,5 +1,6 @@
 from datetime import timedelta
 from functools import wraps
+from urllib.parse import urlencode
 
 import tablib
 from django.core.paginator import Paginator
@@ -101,6 +102,7 @@ def _selection(request, lang, default_preset="today"):
         "location_query": location["query"],
         # Keeps the location and the date range when moving between pages.
         "filter_query": f"{location['query']}&{range_query}",
+        "range_query": range_query,
     }
 
 
@@ -147,6 +149,14 @@ def _label_days(traffic, monthly):
         bar["label"] = date_format(bar["period"], "M" if monthly else "d")
         bar["show_label"] = i % every == 0
     return traffic
+
+
+def _query_without(request, keys):
+    """The current query string without `keys` (for links that set one of them)."""
+    query = request.GET.copy()
+    for key in keys:
+        query.pop(key, None)
+    return query.urlencode()
 
 
 def _paginate(request, items, prefix="", default_size=DETAIL_PAGE_SIZE, anchor=""):
@@ -201,7 +211,14 @@ def overview(request, lang):
     ctx = _selection(request, lang)
     if ctx is None:
         return _no_devices(request, lang)
+    # Search by device name/ID (narrows the people card and the device cards) and by location name
+    # (chips that switch the header filter). Kept in the location/date links like the type filter.
+    q = request.GET.get("q", "").strip()[:100]
     devices = _module_devices(ctx, DeviceList.TYPE_PEOPLE)
+    if q:
+        devices = [device for device in devices if q.lower() in device.id.lower() or q.lower() in (device.name or "").lower()]
+        ctx["location_query"] += f"&{urlencode({'q': q})}"
+        ctx["filter_query"] += f"&{urlencode({'q': q})}"
     _sensor_context(ctx, devices)
     ctx["kpis"] = queries.kpis(devices, ctx["start"], ctx["end"])
     device_filter = ctx["location"]["device_filter"]
@@ -218,24 +235,67 @@ def overview(request, lang):
 
     # People counting stays one combined card shown first; every other sensor gets its own card in the
     # same grid (ordered by type, then name) and is paginated. Types without devices are not shown.
+    # Sensor Summary: location + dates only (the type filter and search narrow the cards below).
+    summary = queries.sensor_summary(device_filter, ctx["start"], ctx["end"])
+    # Clicking a status in the summary narrows the cards to it (?status=critical|warning|normal|nodata|battery).
+    status = request.GET.get("status", "")
+    if status not in (*queries.STATUSES, "battery"):
+        status = ""
+
     cards = queries.device_cards(device_filter, ctx["start"], ctx["end"], types)
+    if status == "battery":
+        cards = [card for card in cards if card["device"].id in summary["low_battery_ids"]]
+    elif status:
+        cards = [card for card in cards if summary["status_by_device"].get(card["device"].id) == status]
+    if q:
+        needle = q.lower()
+        cards = [card for card in cards if needle in card["device"].id.lower() or needle in (card["device"].name or "").lower()]
     page, pager = _paginate(request, cards, "dev_", DETAIL_PAGE_SIZE, "devices")
     icons = {section["key"]: section["icon"] for section in SECTIONS}
     for card in page:
         card["icon"] = icons[card["type"]]
     total = DeviceList.objects.filter(**device_filter)
+    if q:
+        total = total.filter(queries.search_devices(q))
     ctx.update(
         sensor=sensor,
         sensor_options=[(section["key"], t[f"module_{section['key']}"]) for section in SECTIONS],
-        show_people=DeviceList.TYPE_PEOPLE in types and bool(devices),
+        show_people=DeviceList.TYPE_PEOPLE in types and bool(devices) and not status,
         people_name=t["module_people"],
         device_cards=list(page),
         device_pager=pager,
         total_devices=(total.filter(type=sensor) if sensor else total).count(),
         # Inside one toilet the cards drop the location line (the title already names it).
         scope_selected=ctx["location"]["selected"]["scope"] is not None,
+        q=q,
+        location_matches=queries.search_locations(q) if q else [],
+        summary=summary,
+        paper_types=["toilet-paper", "tissue"],
+        low_battery_limit=queries.LOW_BATTERY,
+        status=status,
+        status_label=t[f"status_{status}"] if status else "",
+        # Base for the summary's status links: location + dates (+ type), never the search.
+        summary_query=ctx["filter_query"].split("&q=")[0],
     )
     return render(request, "dashboard/overview.html", ctx)
+
+
+def _notification_traffic(request, devices, start, end, scope_selected):
+    """Above Scope level (several toilets): a bubble chart of device x hour plus a summary per device.
+    Inside one Scope, or for one device picked with ?nt_device=: the per-day timeline."""
+    picked = next((d for d in devices if d.id == request.GET.get("nt_device")), None)
+    shown = [picked] if picked else devices
+    ctx = {
+        "nt_devices": devices if len(devices) > 1 else [],
+        "nt_device": picked,
+        # The device picker is a small GET form: it resubmits every other parameter unchanged.
+        "nt_hidden": [(key, value) for key, values in request.GET.lists() if key != "nt_device" for value in values],
+    }
+    if not picked and not scope_selected:
+        ctx["bubbles"] = queries.notification_bubbles(shown, start, end)
+    else:
+        ctx["timeline"] = queries.notification_timeline(shown, start, end)
+    return ctx
 
 
 @localized
@@ -250,11 +310,35 @@ def people_counting(request, lang):
         module_name=ctx["t"]["module_people"],
         kpis=queries.kpis(devices, start, end),
         chart=queries.hourly(devices, start, end),
+        **_notification_traffic(request, devices, start, end, ctx["location"]["selected"]["scope"] is not None),
+        # Inside one toilet the sensors drop the location line (the title already names it).
+        scope_selected=ctx["location"]["selected"]["scope"] is not None,
     )
     wo_page, ctx["wo_pager"] = _paginate(request, queries.work_orders(devices, start, end), "wo_",
                                          PREVIEW_PAGE_SIZE, "notification-log")
     ev_page, ctx["event_pager"] = _paginate(request, queries.events(devices, start, end), "ev_",
                                             PREVIEW_PAGE_SIZE, "event-log")
+    # Sensor table with its own filters (st_q name/ID, st_status, st_sort) and pagination (st_page/st_size).
+    st_status = request.GET.get("st_status", "")
+    if st_status not in ("online", "offline", "near"):
+        st_status = ""
+    st_sort = request.GET.get("st_sort", "attention")
+    if st_sort not in queries.SENSOR_SORTS:
+        st_sort = "attention"
+    st_q = request.GET.get("st_q", "").strip()[:100]
+    rows = queries.sensor_table(devices, start, end, st_status, st_q, st_sort)
+    st_page, ctx["sensor_pager"] = _paginate(request, rows, "st_", PREVIEW_PAGE_SIZE, "sensor-table")
+    online = ctx["online_count"]
+    ctx.update(
+        sensor_rows=list(st_page), st_status=st_status, st_sort=st_sort, st_q=st_q,
+        st_sorts=queries.SENSOR_SORTS,
+        near_pct=queries.NEAR_THRESHOLD,
+        st_hidden=[(key, value) for key, values in request.GET.lists()
+                   if key not in ("st_status", "st_sort", "st_q", "st_page") for value in values],
+        st_base=_query_without(request, ("st_status", "st_page")),
+        online_donut=queries.online_donut(online, len(ctx["sensors"])),
+        offline_count=len(ctx["sensors"]) - online,
+    )
     ctx.update(wo_rows=[queries.work_order_row(log) for log in wo_page], event_rows=list(ev_page))
     return render(request, "dashboard/people_counting.html", ctx)
 

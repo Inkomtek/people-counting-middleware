@@ -28,6 +28,68 @@
     levels.slice(levels.indexOf(select) + 1).forEach(function (lower) { lower.value = "all"; });
   }, true);
 
+  // ---------- overview search ----------
+  // Typing in the search box re-fetches the overview with ?q= (debounced) and swaps the results and
+  // the device total in place, so the box keeps focus. The URL follows, so refresh/back keep the search.
+  var SEARCH_SWAP = ["[data-search-results]", "[data-search-total]"];
+  var searchTimer = null;
+  var searchRequest = 0;
+
+  function runSearch(input) {
+    var url = new URL(window.location.href);
+    var q = input.value.trim();
+    var form = input.form;
+    if (q) url.searchParams.set(input.name, q); else url.searchParams.delete(input.name);
+    url.searchParams.delete(form.dataset.searchReset || "dev_page");
+    var clear = input.form.querySelector("[data-search-clear]");
+    if (clear) clear.hidden = !input.value;
+    var request = ++searchRequest;
+    fetch(url.toString(), { headers: { "X-Requested-With": "fetch" }, cache: "no-store" })
+      .then(function (response) {
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return response.text();
+      })
+      .then(function (html) {
+        if (request !== searchRequest) return;  // an older, slower answer
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        SEARCH_SWAP.forEach(function (selector) {
+          var fresh = doc.querySelector(selector);
+          var current = document.querySelector(selector);
+          if (fresh && current) current.outerHTML = fresh.outerHTML;
+        });
+        if (input.name !== "q") { history.replaceState(null, "", url.toString()); return; }
+        // The header form carries q as a hidden field so changing location/type keeps the search.
+        var hidden = document.querySelector('form:not([data-search]) input[type="hidden"][name="q"]');
+        var header = document.querySelector("[data-location-level]");
+        if (header && header.form) {
+          if (!hidden && q) {
+            hidden = document.createElement("input");
+            hidden.type = "hidden"; hidden.name = "q";
+            header.form.appendChild(hidden);
+          }
+          if (hidden) { if (q) hidden.value = q; else hidden.remove(); }
+        }
+        history.replaceState(null, "", url.toString());
+      })
+      .catch(function () {});
+  }
+
+  document.addEventListener("input", function (event) {
+    var input = event.target.closest("[data-search] input[type=search]");
+    if (!input) return;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(function () { runSearch(input); }, 300);
+  });
+
+  document.addEventListener("click", function (event) {
+    var clear = event.target.closest("[data-search-clear]");
+    if (!clear) return;
+    var input = clear.form.querySelector("input[type=search]");
+    input.value = "";
+    input.focus();
+    runSearch(input);
+  });
+
   // ---------- auto-refresh ----------
   // Every `data-refresh-seconds` (set in Admin > Scheduler config) re-fetch this page and swap in the
   // regions below, keeping scroll position and open controls. Failed fetches show a banner and back off.

@@ -9,18 +9,40 @@
     {% for key, label in sensor_options %}<option value="{{ key }}"{% if key == sensor %} selected{% endif %}>{{ label }}</option>{% endfor %}
   </select>
 </label>
+{% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
 {% endblock %}
 
 {% block content %}
-<div class="section-title">
-  <h2>{{ t.sensor_summary }}</h2>
+{% include "dashboard/_summary.html" %}
+
+<div class="section-title" id="all-sensors">
+  <h2>{{ t.all_sensors }}</h2>
+  <form class="search-box" role="search" data-search onsubmit="return false">
+    {% include "dashboard/_icon.html" with name="search" %}
+    <input type="search" name="q" value="{{ q }}" placeholder="{{ t.search_placeholder }}" aria-label="{{ t.search_placeholder }}" autocomplete="off" maxlength="100">
+    <button type="button" class="search-clear" data-search-clear aria-label="{{ t.search_clear }}"{% if not q %} hidden{% endif %}>{% include "dashboard/_icon.html" with name="x" %}</button>
+  </form>
   <span class="section-meta">
     <span class="muted small">{{ t.period_label }} {% include "dashboard/_period.html" %}</span>
-    <span class="chip">{% tr "total_devices" n=total_devices|intcomma %}</span>
+    <span class="chip" data-search-total>{% tr "total_devices" n=total_devices|intcomma %}</span>
   </span>
 </div>
 
-<div id="devices">
+<div id="devices" data-search-results>
+  {% if status %}
+  <div class="search-locations small">
+    <a class="chip chip--filter" href="?{{ filter_query }}#all-sensors" title="{{ t.clear_filter }}">{% tr "filtered_status" label=status_label %}{% if sensor %} · {% tr "module_"|add:sensor %}{% endif %} {% include "dashboard/_icon.html" with name="x" %}</a>
+  </div>
+  {% endif %}
+  {% if location_matches %}
+  <div class="search-locations small">
+    <span class="muted">{{ t.search_locations }}</span>
+    {% for loc in location_matches %}<a class="chip" href="?{{ loc.query }}{% if sensor %}&sensor={{ sensor }}{% endif %}&{{ range_query }}">{% include "dashboard/_icon.html" with name="pin" %}{{ loc.label }}</a>{% endfor %}
+  </div>
+  {% endif %}
+  {% if q or status %}{% if not show_people and not device_cards %}
+  <div class="card empty">{% if q %}{% tr "search_no_match" q=q %}{% else %}{{ t.no_data }}{% endif %}</div>
+  {% endif %}{% endif %}
   <div class="bento">
     {% if show_people %}
     <a class="card section section--people" href="{% url 'dashboard:people_counting' %}?{{ filter_query }}">
@@ -49,7 +71,7 @@
   {% include "dashboard/_pager.html" with pager=device_pager %}
 </div>
 
-{% if not show_people and not device_cards %}
+{% if not q and not show_people and not device_cards %}
 <div class="card empty">{{ t.no_data }}</div>
 {% endif %}
 {% endblock %}

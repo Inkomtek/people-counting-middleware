@@ -419,6 +419,192 @@ class DashboardTests(TestCase):
         self.assertEqual([t["pct"] for t in ticks], ["0", "22", "44", "66", "88"])
         self.assertContains(response, 'style="--p: 22"')  # never "22,0" (invalid CSS)
 
+    def test_notification_timeline_per_day_with_gaps(self):
+        from dashboard import queries
+
+        NotificationLog.objects.all().delete()
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
+        tz = timezone.get_current_timezone()
+
+        def notify(day, hour, minute, status="200 OK"):
+            log = NotificationLog.objects.create(device=self.device, endpoint_url="x", response_status=status)
+            NotificationLog.objects.filter(pk=log.pk).update(
+                time=timezone.datetime.combine(day, timezone.datetime.min.time().replace(hour=hour, minute=minute), tz))
+
+        notify(yesterday, 9, 15)
+        notify(yesterday, 10, 57, "ERROR")
+        notify(yesterday, 11, 30)
+        notify(today, 6, 0)
+        timeline = queries.notification_timeline([self.device], yesterday, today)
+        self.assertEqual([(row["day"], row["count"]) for row in timeline["days"]], [(today, 1), (yesterday, 3)])
+        dots = timeline["days"][1]["dots"]
+        self.assertEqual([d["gap"] for d in dots], [None, 102, 33])  # no gap across days
+        self.assertEqual(dots[0]["pct"], "38.542")  # 09:15 of 24 h
+        self.assertEqual((dots[1]["gap_label"], dots[2]["gap_label"]), (True, False))  # 33 min is too narrow
+        self.assertFalse(dots[1]["success"])
+        self.assertEqual((timeline["total"], timeline["count"], timeline["average"]), (4, 2, 68))
+        self.assertEqual((timeline["fastest"]["gap"], timeline["slowest"]["gap"]), (33, 102))
+        response = self.client.get("/people-counting/", {"start": yesterday.isoformat(), "end": today.isoformat(),
+                                                         "scope": self.scope.pk})
+        self.assertNotIn("bubbles", response.context)
+        self.assertContains(response, "Lalu Lintas Notifikasi")
+        self.assertContains(response, "<em>1j 42m</em>")
+        self.assertContains(response, "timeline-dot--failed")
+        self.assertContains(response, "3 notif")
+
+    def test_notification_timeline_with_one_notification_has_no_gap(self):
+        NotificationLog.objects.all()[0].delete()  # one left today: no fastest/slowest gap
+        response = self.client.get("/people-counting/", {"scope": self.scope.pk, "range": "today"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context["timeline"]["fastest"])
+        self.assertContains(response, "1 notif")
+
+    def test_notification_timeline_empty(self):
+        NotificationLog.objects.all().delete()
+        self.assertContains(self.client.get("/people-counting/"), "Belum ada notifikasi pada periode ini.")
+
+    def test_notification_bubbles_above_scope(self):
+        from dashboard import queries
+
+        NotificationLog.objects.all().delete()
+        other = self.add_people_device("pc-2", "Toilet Wanita", scope=self.other_scope)
+        day = timezone.localdate() - timedelta(days=1)
+        tz = timezone.get_current_timezone()
+        for device, hour, minute in [(self.device, 9, 0), (self.device, 9, 20), (self.device, 9, 50),
+                                     (other, 9, 10), (other, 14, 0)]:
+            log = NotificationLog.objects.create(device=device, endpoint_url="x", response_status="200 OK")
+            NotificationLog.objects.filter(pk=log.pk).update(
+                time=timezone.datetime.combine(day, timezone.datetime.min.time().replace(hour=hour, minute=minute), tz))
+        bubbles = queries.notification_bubbles([self.device, other], day, day)
+        first, second = bubbles["rows"]
+        nine = first["bubbles"][9]
+        # Gaps only within the same device: 20 and 30 min, not 10 min to the other toilet.
+        self.assertEqual((nine["count"], nine["average"], nine["level"], nine["size"]), (3, 25, "fast", "30"))
+        self.assertEqual((second["bubbles"][9]["level"], second["bubbles"][14]["level"]), ("none", "slow"))
+        self.assertEqual((first["total"], first["average"], first["fastest"]["gap"], first["slowest"]["gap"]),
+                         (3, 25, 20, 30))
+        self.assertEqual(second["location"], "Gedung A · Floor 10 - Toilet Wanita West")
+
+        params = {"start": day.isoformat(), "end": day.isoformat()}
+        response = self.client.get("/people-counting/", params)
+        self.assertIn("bubbles", response.context)
+        self.assertContains(response, "bubble bubble--fast")
+        # Inside one Scope, or with one device picked, it is the timeline again.
+        self.assertNotIn("bubbles", self.client.get("/people-counting/", {**params, "scope": self.scope.pk}).context)
+        picked = self.client.get("/people-counting/", {**params, "nt_device": "pc-2"})
+        self.assertNotIn("bubbles", picked.context)
+        self.assertEqual(picked.context["timeline"]["total"], 2)
+        self.assertContains(picked, '<input type="hidden" name="start"')
+
+    def test_sensor_table_filters_sort_and_status_donut(self):
+        busy = self.add_people_device("pc-busy", "Pintu Utama", count=9, events=3, scope=self.other_scope)
+        quiet = self.add_people_device("pc-quiet", "Wastafel", count=1)
+        SensorLog.objects.create(device=quiet, status=SensorLog.STATUS_OFFLINE, endpoint_url="x", response={})
+        NotificationLog.objects.create(device=busy, endpoint_url="x", response_status="ERROR")
+        response = self.client.get("/people-counting/")
+        rows = response.context["sensor_rows"]
+        # Needs attention: offline first, then closest to the trigger (busy 9/10 = 90%, main 8/20 = 40%).
+        self.assertEqual([r["device"].id for r in rows], ["pc-quiet", "pc-busy", DEVICE_ID])
+        busy_row = rows[1]
+        self.assertEqual((busy_row["visitors"], busy_row["notifications"], busy_row["failed"], busy_row["near"]),
+                         (3, 1, 1, True))
+        self.assertEqual(busy_row["location"], "Gedung A · Floor 10 - Toilet Wanita West")
+        self.assertEqual((response.context["online_count"], response.context["offline_count"]), (2, 1))
+        self.assertEqual([seg["kind"] for seg in response.context["online_donut"]], ["online", "offline"])
+        self.assertContains(response, "<th>Lokasi</th>")
+
+        def ids(**params):
+            return [r["device"].id for r in self.client.get("/people-counting/", params).context["sensor_rows"]]
+
+        self.assertEqual(ids(st_status="offline"), ["pc-quiet"])
+        self.assertEqual(ids(st_status="near"), ["pc-busy"])
+        self.assertEqual(ids(st_q="WASTA"), ["pc-quiet"])
+        self.assertEqual(ids(st_sort="visitors"), ["pc-busy", DEVICE_ID, "pc-quiet"])
+        self.assertEqual(ids(st_sort="name"), [DEVICE_ID, "pc-busy", "pc-quiet"])  # unnamed: label = ID
+        scoped = self.client.get("/people-counting/", {"scope": self.scope.pk})
+        self.assertNotContains(scoped, "<th>Lokasi</th>")
+
+    def test_overview_search_by_device_name_and_id(self):
+        DeviceList.objects.create(id="soap-a", type="soap", name="Sabun Wastafel", scope=self.scope)
+        DeviceList.objects.create(id="trash-x9", type="trash", name="Sampah", scope=self.scope)
+        by_name = self.client.get("/", {"q": "wastafel"})
+        self.assertEqual([c["device"].id for c in by_name.context["device_cards"]], ["soap-a"])
+        self.assertFalse(by_name.context["show_people"])
+        self.assertEqual(by_name.context["total_devices"], 1)
+        by_id = self.client.get("/", {"q": "X9"})
+        self.assertEqual([c["device"].id for c in by_id.context["device_cards"]], ["trash-x9"])
+        people = self.client.get("/", {"q": DEVICE_ID[-6:]})
+        self.assertTrue(people.context["show_people"])
+        self.assertEqual(people.context["device_cards"], [])
+        self.assertIn("q=", people.context["filter_query"])
+        none = self.client.get("/", {"q": "zzz"})
+        self.assertContains(none, "Tidak ada perangkat yang cocok")
+
+    def test_overview_search_lists_matching_locations(self):
+        response = self.client.get("/", {"q": "toilet wanita"})
+        matches = response.context["location_matches"]
+        self.assertEqual([(m["level"], m["label"]) for m in matches],
+                         [("scope", "Gedung A · Floor 10 - Toilet Wanita West")])
+        self.assertContains(response, f'href="?scope={self.other_scope.pk}&range=today"')
+        self.assertEqual([m["level"] for m in self.client.get("/", {"q": "jakarta"}).context["location_matches"]],
+                         ["region"])
+
+    def _reading(self, device, level, severity, condition, minutes_ago=5, battery=80):
+        return SensorReading.objects.create(device=device, time=timezone.now() - timedelta(minutes=minutes_ago),
+                                            level=level, battery=battery, condition=condition, severity=severity)
+
+    def test_sensor_summary_counts_statuses_and_lists(self):
+        soap_a = DeviceList.objects.create(id="soap-a", type="soap", name="Sabun A", scope=self.scope)
+        soap_b = DeviceList.objects.create(id="soap-b", type="soap", name="Sabun B", scope=self.scope)
+        soap_c = DeviceList.objects.create(id="soap-c", type="soap", name="Sabun C", scope=self.scope)
+        DeviceList.objects.create(id="soap-d", type="soap", name="Sabun D", scope=self.scope)  # never sent
+        trash = DeviceList.objects.create(id="trash-a", type="trash", name="Sampah", scope=self.scope)
+        self._reading(soap_a, 50, "normal", "Habis", minutes_ago=200)  # older reading, now critical:
+        self._reading(soap_a, 0, "critical", "Habis", minutes_ago=90, battery=15)
+        self._reading(soap_a, 0, "critical", "Habis", minutes_ago=10, battery=12)
+        self._reading(soap_b, 20, "warning", "Hampir Habis")
+        self._reading(soap_c, 80, "normal", "Terisi", minutes_ago=180)  # older than 2 h -> no data
+        self._reading(trash, 80, "warning", "Hampir Penuh")
+        response = self.client.get("/")
+        summary = response.context["summary"]
+        soap = summary["blocks"]["soap"]
+        self.assertEqual(soap["counts"], {"critical": 1, "warning": 1, "normal": 0, "nodata": 2})
+        self.assertEqual(soap["average_level"], 10)
+        self.assertEqual(summary["blocks"]["trash"]["gauge"], "40")
+        self.assertEqual((summary["kpis"]["critical"], summary["kpis"]["warning"], summary["kpis"]["nodata"],
+                          summary["kpis"]["low_battery"]), (1, 2, 2, 1))
+        self.assertEqual([row["device"].id for row in summary["critical"]], ["soap-a"])
+        since = timezone.localtime(summary["critical"][0]["since"])
+        self.assertAlmostEqual((timezone.now() - since).total_seconds() / 60, 90, delta=1)  # streak start
+        self.assertEqual(summary["people"]["people_in"], 2)
+        self.assertEqual(summary["people"]["trend"]["unit"], "hour")  # today: per hour up to now
+        self.assertEqual(len(summary["people"]["trend"]["values"]), timezone.localtime().hour + 1)
+        week = self.client.get("/", {"range": "7"}).context["summary"]["people"]["trend"]
+        self.assertEqual((week["unit"], len(week["values"]), week["values"][-1]), ("day", 7, 2))
+        self.assertContains(response, "Pengunjung per jam")
+        self.assertContains(response, "Ringkasan sensor")
+        self.assertContains(response, "Semua sensor")
+        self.assertContains(response, 'href="?&amp;range=today&status=critical#all-sensors"')
+        # Clicking a status narrows the cards below.
+        only = self.client.get("/", {"status": "nodata", "sensor": "soap"})
+        self.assertEqual(sorted(c["device"].id for c in only.context["device_cards"]), ["soap-c", "soap-d"])
+        self.assertFalse(only.context["show_people"])
+        self.assertContains(only, "Disaring: Tidak ada data")
+        battery = self.client.get("/", {"status": "battery"})
+        self.assertEqual([c["device"].id for c in battery.context["device_cards"]], ["soap-a"])
+        # The summary ignores the type filter and the search.
+        self.assertEqual(self.client.get("/", {"sensor": "trash", "q": "zzz"}).context["summary"]["kpis"]["devices"], 6)
+
+    def test_sensor_summary_satisfaction_stars(self):
+        feedback = DeviceList.objects.create(id="fb-a", type="satisfaction", scope=self.scope)
+        for rating in (5, 5, 4, 1):
+            CustomerResponse.objects.create(device=feedback, time=timezone.localtime(), rating=rating)
+        satisfaction = self.client.get("/").context["summary"]["satisfaction"]
+        self.assertEqual((satisfaction["average"], satisfaction["count"]), (3.75, 4))
+        self.assertEqual([(s["stars"], s["count"], s["pct"]) for s in satisfaction["stars"]],
+                         [(5, 2, "100.0"), (4, 1, "50.0"), (3, 0, "0.0"), (2, 0, "0.0"), (1, 1, "50.0")])
+
     def test_busiest_hour(self):
         chart = self.client.get("/people-counting/").context["chart"]
         self.assertEqual(chart["busiest_hour"], timezone.localtime().hour)
