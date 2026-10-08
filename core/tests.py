@@ -478,3 +478,42 @@ class SeedLocationsCommandTests(TestCase):
         with self.assertRaises(CommandError):
             self.run_command("--file", handle.name)
         self.assertFalse(Client.objects.exists())
+
+
+class PrimaryKeyAdminTests(TestCase):
+    """Editing a device or endpoint in Admin must update it, never save a copy under a new id."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        self.client.force_login(User.objects.create_superuser("admin", "admin@example.com", "pw"))
+
+    def test_editing_a_device_keeps_its_id(self):
+        device = DeviceList.objects.create(id="SOAP-1", type="soap", name="Sabun lama", maximum_trigger=10)
+        response = self.client.post(f"/admin/core/devicelist/{device.pk}/change/", {
+            "id": "SOAP-1-NEW", "type": "soap", "name": "Sabun baru", "current_count": 0, "maximum_trigger": 12,
+            "building": "", "floor": "", "gender": "",
+        })
+        self.assertEqual(response.status_code, 302, response.content[:2000])
+        self.assertEqual(list(DeviceList.objects.filter(id__startswith="SOAP-1").values_list("id", "name")),
+                         [("SOAP-1", "Sabun baru")])
+        self.assertContains(self.client.get(f"/admin/core/devicelist/{device.pk}/change/"), "SOAP-1")
+
+    def test_new_device_still_takes_its_id(self):
+        response = self.client.post("/admin/core/devicelist/add/", {
+            "id": "TISSUE-9", "type": "tissue", "name": "Tisu", "current_count": 0, "maximum_trigger": 10,
+            "building": "", "floor": "", "gender": "",
+        })
+        self.assertEqual(response.status_code, 302, response.content[:2000])
+        self.assertTrue(DeviceList.objects.filter(id="TISSUE-9").exists())
+
+    def test_editing_an_endpoint_keeps_its_id(self):
+        from core.models import Endpoint
+
+        endpoint = Endpoint.objects.get(id="work-order")
+        response = self.client.post(f"/admin/core/endpoint/{endpoint.pk}/change/", {
+            "id": "work-order-copy", "type": endpoint.type, "url": endpoint.url, "head": "{}", "body": "{}",
+            "is_active": "on",
+        })
+        self.assertEqual(response.status_code, 302, response.content[:2000])
+        self.assertFalse(Endpoint.objects.filter(id="work-order-copy").exists())

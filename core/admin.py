@@ -63,8 +63,17 @@ class TimeRangeFilter(admin.ListFilter):
         }]
 
 
+class FixedIdAdmin(admin.ModelAdmin):
+    """For models whose `id` is a typed-in primary key: the id is set when adding and read-only afterwards.
+    Changing it in the edit form would make Django save a NEW row under the new id and keep the old one."""
+
+    def get_readonly_fields(self, request, obj=None):
+        readonly = super().get_readonly_fields(request, obj)
+        return (*readonly, "id") if obj is not None else readonly
+
+
 @admin.register(Endpoint)
-class EndpointAdmin(admin.ModelAdmin):
+class EndpointAdmin(FixedIdAdmin):
     list_display = ("id", "type", "url", "is_active")
     list_editable = ("is_active",)
     list_filter = ("type", "is_active")
@@ -102,7 +111,7 @@ class ScopeAdmin(admin.ModelAdmin):
 
 
 @admin.register(DeviceList)
-class DeviceListAdmin(admin.ModelAdmin):
+class DeviceListAdmin(FixedIdAdmin):
     list_display = ("id", "name", "type", "scope", "building", "floor", "gender", "current_count", "maximum_trigger",
                     "baseline_done")
     list_filter = ("type", "scope__area__site__client", "scope__area__site", "building", "floor", "gender")
