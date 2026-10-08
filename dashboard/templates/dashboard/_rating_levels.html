@@ -1,4 +1,4 @@
 {% load humanize dashboard_tags %}{# 3-level satisfaction as one bar row per level (count + %): `ratings` from queries.rating_levels. #}
 <div class="level-rows" role="img" aria-label="{{ t.satisfaction }}">
-  {% for l in ratings.levels %}<div class="level-row small" title="{% tr 'level_'|add:l.level %} · {{ l.count|intcomma }} ({{ l.pct }}%)"><span>{% tr "level_"|add:l.level %}</span><span class="level-bar"><span class="level-{{ l.level }}" style="width: {{ l.width }}%"></span></span><span class="muted">{{ l.count|intcomma }} · {{ l.pct }}%</span></div>{% endfor %}
+  {% for l in ratings.levels %}<div class="level-row small" title="{% tr 'level_'|add:l.level %} · {{ l.count|intcomma }} ({{ l.pct }}%)"><span>{% tr "level_"|add:l.level %}</span><span class="level-bar"><span class="level-{{ l.level }}" style="width: {{ l.width }}%"></span></span><span class="level-value"><strong>{{ l.pct }}%</strong> <span class="muted">({{ l.count|intcomma }})</span></span></div>{% endfor %}
 </div>

@@ -516,8 +516,8 @@ a.summary-kpi:hover { border-color: var(--accent); }
 .summary-note { margin: 0; }
 .summary-card .donut { width: 104px; height: 104px; }
 .level-rows { display: flex; flex-direction: column; gap: 6px; }
-.level-row { display: grid; grid-template-columns: 78px 1fr 64px; align-items: center; gap: 8px; }
-.level-row .muted { text-align: right; white-space: nowrap; }
+.level-row { display: grid; grid-template-columns: 78px 1fr 78px; align-items: center; gap: 8px; }
+.level-row .level-value { text-align: right; white-space: nowrap; }
 .level-bar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
 .level-bar span { display: block; height: 100%; border-radius: 4px; background: var(--c); }
 .summary-lists--single { grid-template-columns: 1fr; }
