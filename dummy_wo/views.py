@@ -12,7 +12,7 @@ from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_http_methods
 
 from .models import WorkOrder
 
@@ -46,8 +46,15 @@ def _reply(payload, accepted, status, message):
 
 
 @csrf_exempt
-@require_POST
+@require_http_methods(["GET", "POST"])
 def api_iot(request):
+    if request.method == "GET":
+        # Opening the URL in a browser is a health check, not a Work Order (the real server takes POST only).
+        return JsonResponse({
+            "status": "ok",
+            "message": "Dummy Work Order API aktif. Kirim POST JSON berisi: " + ", ".join(REQUIRED_FIELDS),
+            "required_fields": list(REQUIRED_FIELDS),
+        })
     try:
         payload = json.loads(request.body)
     except ValueError:

@@ -27,6 +27,12 @@ class DummyApiTests(TestCase):
         self.assertEqual(result["LOC_ID_DESC"], BODY["LOC_ID"])
         self.assertTrue(WorkOrder.objects.get().accepted)
 
+    def test_get_is_a_health_check(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
+        self.assertFalse(WorkOrder.objects.exists())
+
     def test_wrong_token_is_rejected(self):
         response = self.client.post(self.url, {**BODY, "token": "x"}, content_type="application/json")
         self.assertEqual(response.status_code, 401)
