@@ -74,7 +74,7 @@
   {% block breadcrumb %}{% endblock %}
 
   <div class="alert alert--warn" data-offline-alert role="status" hidden>{{ t.offline_alert }}</div>
-  <div data-alerts>{% block alerts %}{% if stale %}<div class="alert alert--bad" role="status">{% if stale.never %}{{ t.stale_never }}{% else %}{% tr "stale_alert" time=stale.time|date:"H:i" n=stale.minutes %}{% endif %}</div>{% endif %}{% endblock %}</div>
+  <div data-alerts>{% block alerts %}{% endblock %}</div>
 
   <main id="content">
     {% block content %}{% endblock %}

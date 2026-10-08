@@ -14,24 +14,39 @@
 
 {% block content %}
 {% include "dashboard/_summary.html" %}
+<hr class="section-divider">
 
-<div class="section-title" id="all-sensors">
-  <h2>{{ t.all_sensors }}</h2>
-  <form class="search-box" role="search" data-search onsubmit="return false">
-    {% include "dashboard/_icon.html" with name="search" %}
-    <input type="search" name="q" value="{{ q }}" placeholder="{{ t.search_placeholder }}" aria-label="{{ t.search_placeholder }}" autocomplete="off" maxlength="100">
-    <button type="button" class="search-clear" data-search-clear aria-label="{{ t.search_clear }}"{% if not q %} hidden{% endif %}>{% include "dashboard/_icon.html" with name="x" %}</button>
+<div class="section-title section-title--search" id="all-sensors">
+  <div>
+    <h2>{{ t.all_sensors }}</h2>
+    <p class="muted small">{{ t.period_label }} {% include "dashboard/_period.html" %}</p>
+  </div>
+  <form class="search-form" role="search" method="get" action="#all-sensors" data-search data-search-reset="dev_page">
+    {% for key, value in search_hidden %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+    <label class="search-box">
+      {% include "dashboard/_icon.html" with name="search" %}
+      <input type="search" name="q" value="{{ q }}" placeholder="{{ t.search_placeholder }}" aria-label="{{ t.search_placeholder }}" autocomplete="off" maxlength="100">
+      <button type="button" class="search-clear" data-search-clear aria-label="{{ t.search_clear }}"{% if not q %} hidden{% endif %}>{% include "dashboard/_icon.html" with name="x" %}</button>
+    </label>
+    <button type="submit" class="btn btn--primary">{{ t.search_button }}</button>
   </form>
-  <span class="section-meta">
-    <span class="muted small">{{ t.period_label }} {% include "dashboard/_period.html" %}</span>
-    <span class="chip" data-search-total>{% tr "total_devices" n=total_devices|intcomma %}</span>
-  </span>
 </div>
 
 <div id="devices" data-search-results>
-  {% if status %}
-  <div class="search-locations small">
-    <a class="chip chip--filter" href="?{{ filter_query }}#all-sensors" title="{{ t.clear_filter }}">{% tr "filtered_status" label=status_label %}{% if sensor %} · {% tr "module_"|add:sensor %}{% endif %} {% include "dashboard/_icon.html" with name="x" %}</a>
+  {% comment %}Status boxes = filter (the active one is highlighted, clicking it again shows all).{% endcomment %}
+  <div class="summary-kpis">
+    {% for key, value in status_boxes %}
+    <a class="card summary-kpi summary-kpi--{{ key }}{% if value == status %} is-active{% endif %}" href="?{{ filter_query }}{% if value and value != status %}&status={{ value }}{% endif %}#all-sensors"{% if value == status %} aria-current="true"{% endif %}>
+      <span class="muted small">{% if key == "devices" %}{{ t.kpi_devices }}{% elif key == "critical" %}{{ t.kpi_critical }}{% else %}{% tr "status_"|add:key %}{% endif %}</span>
+      <strong>{{ status_counts|get:key|intcomma }}</strong>
+    </a>
+    {% endfor %}
+  </div>
+  {% if active_filters %}
+  <div class="active-filters small">
+    <span class="muted">{{ t.filtered_by }}</span>
+    {% for f in active_filters %}{% if f.url %}<a class="chip chip--filter" href="{{ f.url }}" title="{{ t.clear_filter }}"><span class="muted">{{ f.label }}:</span> {{ f.value }} {% include "dashboard/_icon.html" with name="x" %}</a>{% else %}<span class="chip chip--filter chip--static"><span class="muted">{{ f.label }}:</span> {{ f.value }}</span>{% endif %}{% endfor %}
+    {% if active_filters|length > 1 or active_filters.0.url %}<a class="clear-filters" href="?#all-sensors">{{ t.clear_all_filters }}</a>{% endif %}
   </div>
   {% endif %}
   {% if location_matches %}
@@ -40,38 +55,16 @@
     {% for loc in location_matches %}<a class="chip" href="?{{ loc.query }}{% if sensor %}&sensor={{ sensor }}{% endif %}&{{ range_query }}">{% include "dashboard/_icon.html" with name="pin" %}{{ loc.label }}</a>{% endfor %}
   </div>
   {% endif %}
-  {% if q or status %}{% if not show_people and not device_cards %}
+  {% if q or status %}{% if not device_cards %}
   <div class="card empty">{% if q %}{% tr "search_no_match" q=q %}{% else %}{{ t.no_data }}{% endif %}</div>
   {% endif %}{% endif %}
   <div class="bento">
-    {% if show_people %}
-    <a class="card section section--people" href="{% url 'dashboard:people_counting' %}?{{ filter_query }}">
-      <div class="section-head">
-        <span class="section-icon">{% include "dashboard/_icon.html" with name="people" %}</span>
-        <span class="badge {% if online_count == sensors|length %}badge--ok{% else %}badge--warn{% endif %}"><i class="dot"></i>{% tr "n_online" n=online_count total=sensors|length %}</span>
-      </div>
-      <h2 class="section-name">{{ people_name }}</h2>
-      <div class="section-metric section-metric--stack">
-        <span class="metric">{{ kpis.people_in|intcomma }}</span>
-        <span class="metric-label">{% if is_today %}{{ t.visitors_in_today_card }}{% else %}{{ t.visitors_in_range_card }} · {% include "dashboard/_period.html" %}{% endif %}</span>
-      </div>
-      {% if scope_selected %}
-      <ul class="sensor-ids small">
-        {% for s in sensors %}<li>{% if s.device.name %}<span>{{ s.device.name }}</span> · {% endif %}<span class="mono">ID {{ s.device.id }}</span></li>{% endfor %}
-      </ul>
-      {% endif %}
-      <div class="section-foot">
-        <span class="muted">{{ t.notifications_sent }}</span>
-        <span>{% tr "n_success_failed" n=kpis.wo_sent|intcomma s=kpis.wo_success|intcomma f=kpis.wo_failed|intcomma %}</span>
-      </div>
-    </a>
-    {% endif %}
     {% for card in device_cards %}{% include "dashboard/_device_card.html" %}{% endfor %}
   </div>
   {% include "dashboard/_pager.html" with pager=device_pager %}
 </div>
 
-{% if not q and not show_people and not device_cards %}
+{% if not q and not status and not device_cards %}
 <div class="card empty">{{ t.no_data }}</div>
 {% endif %}
 {% endblock %}

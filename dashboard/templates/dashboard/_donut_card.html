@@ -1,0 +1,19 @@
+{% load humanize dashboard_tags %}{# Summary card with a status donut for one sensor type: `b` (sensor_summary block), `key` (type), `icon`. #}
+<div class="card summary-card">
+  <div class="summary-head">
+    <span class="section-icon">{% include "dashboard/_icon.html" with name=icon %}</span>
+    <h3>{% tr "module_"|add:key %}</h3>
+    <span class="chip">{% tr "n_devices" n=b.total %}</span>
+  </div>
+  {% if b.average_level is not None %}<p class="summary-note small"><span class="muted">{% if key == "trash" %}{% tr "avg_fullness_n" n=b.average_level %}{% elif key == "ammonia" %}{% tr "avg_ppm" n=b.average_level %}{% else %}{% tr "avg_fill" n=b.average_level %}{% endif %}</span></p>{% endif %}
+  <div class="donut-wrap">
+    <svg class="donut" viewBox="0 0 42 42" role="img" aria-label="{% tr 'module_'|add:key %}">
+      <circle class="donut-track" cx="21" cy="21" r="15.915"/>
+      {% for seg in b.donut %}<circle class="donut-seg status-{{ seg.status }}" cx="21" cy="21" r="15.915" stroke-dasharray="{{ seg.dash }}" stroke-dashoffset="{{ seg.offset }}"/>{% endfor %}
+      <text x="21" y="21" class="donut-total">{{ b.total }}</text>
+      <text x="21" y="27" class="donut-caption">{{ t.devices_short }}</text>
+    </svg>
+    {% include "dashboard/_status_legend.html" with b=b type=key %}
+  </div>
+  <div class="summary-foot small"><span class="muted">{{ t.notifications_sent }}</span><strong>{{ b.notifications|intcomma }}</strong></div>
+</div>

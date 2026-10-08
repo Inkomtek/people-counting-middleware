@@ -29,10 +29,10 @@
   }, true);
 
   // ---------- overview search ----------
-  // Typing in the search box re-fetches the overview with ?q= (debounced) and swaps the results and
-  // the device total in place, so the box keeps focus. The URL follows, so refresh/back keep the search.
+  // Submitting a search form (button or Enter) re-fetches the page with the query and swaps the results
+  // and the device total in place (no reload). The URL follows, so refresh/back keep the search.
+  // Without JS the form is a plain GET.
   var SEARCH_SWAP = ["[data-search-results]", "[data-search-total]"];
-  var searchTimer = null;
   var searchRequest = 0;
 
   function runSearch(input) {
@@ -74,11 +74,19 @@
       .catch(function () {});
   }
 
+  document.addEventListener("submit", function (event) {
+    var form = event.target.closest("[data-search]");
+    if (!form) return;
+    event.preventDefault();
+    runSearch(form.querySelector("input[type=search]"));
+  });
+
+  // The clear button only shows while there is text to clear.
   document.addEventListener("input", function (event) {
     var input = event.target.closest("[data-search] input[type=search]");
     if (!input) return;
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(function () { runSearch(input); }, 300);
+    var clear = input.form.querySelector("[data-search-clear]");
+    if (clear) clear.hidden = !input.value;
   });
 
   document.addEventListener("click", function (event) {

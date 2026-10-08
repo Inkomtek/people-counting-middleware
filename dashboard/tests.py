@@ -58,10 +58,13 @@ class DashboardTests(TestCase):
     def test_overview_is_public_and_hides_types_without_devices(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.context["show_people"])
-        self.assertEqual(response.context["device_cards"], [])
+        # Every device is its own card, people counters included (first, ONLINE badge, visitors).
+        self.assertEqual([c["device"].id for c in response.context["device_cards"]], [DEVICE_ID])
+        people = response.context["device_cards"][0]["people"]
+        self.assertEqual((people["visitors"], people["current_count"], people["online"]), (2, 8, True))
+        self.assertContains(response, "Hitungan 8/20")
         self.assertNotContains(response, "Segera Hadir")
-        self.assertEqual(response.context["kpis"]["people_in"], 2)
+        self.assertEqual(response.context["summary"]["people"]["people_in"], 2)
 
     def test_one_card_per_device_grouped_by_type(self):
         soap_a = DeviceList.objects.create(id="soap-a", type="soap", name="Sabun A", scope=self.scope)
@@ -72,19 +75,19 @@ class DashboardTests(TestCase):
         response = self.client.get("/")
         cards = response.context["device_cards"]
         # One flowing grid ordered by type, then name; no per-type headings.
-        self.assertEqual([c["device"].id for c in cards], ["soap-a", "soap-b", "trash-a"])
+        self.assertEqual([c["device"].id for c in cards], [DEVICE_ID, "soap-a", "soap-b", "trash-a"])
         self.assertNotContains(response, "group-title")
         soap_cards = {card["device"].id: card for card in cards}
         self.assertEqual(soap_cards["soap-a"]["latest"].level, 44)
         self.assertEqual(soap_cards["soap-a"]["location"], "Gedung A · Floor 10 - Toilet Pria West")
         self.assertFalse(soap_cards["soap-b"]["has_data"])
-        self.assertContains(response, 'aria-label="Baterai Sabun A"')
-        self.assertContains(response, 'style="width: 92%"')
+        self.assertNotContains(response, 'aria-label="Baterai Sabun A"')  # no bars in the device cards
+        self.assertContains(response, "44<small>%</small>")
         self.assertContains(response, "Menunggu data")
         self.assertContains(response, "Gedung A · Floor 10 - Toilet Wanita West")
         # Inside one toilet the location line is dropped.
         scoped = self.client.get("/", {"scope": self.scope.pk})
-        self.assertEqual([c["device"].id for c in scoped.context["device_cards"]], ["soap-a", "trash-a"])
+        self.assertEqual([c["device"].id for c in scoped.context["device_cards"]], [DEVICE_ID, "soap-a", "trash-a"])
         self.assertNotContains(scoped, "Gedung A · Floor 10 - Toilet Pria West</span>")
 
     def test_satisfaction_card_per_device(self):
@@ -92,11 +95,12 @@ class DashboardTests(TestCase):
         CustomerResponse.objects.create(device=feedback, time=timezone.localtime(), rating=4, comment="Cukup bersih")
         CustomerResponse.objects.create(device=feedback, time=timezone.localtime(), rating=5, comment="Bersih")
         response = self.client.get("/")
-        card = response.context["device_cards"][0]
-        self.assertEqual((card["device"].label, card["average_rating"], card["response_count"], card["rating_progress"]),
-                         ("Tombol Rating A", 4.5, 2, 90))
-        self.assertContains(response, "Rating terakhir: 5/5")
-        self.assertContains(response, "2 rating")
+        card = response.context["device_cards"][1]  # after the people counter
+        self.assertEqual((card["device"].label, card["ratings"]["total"], card["ratings"]["excellent_pct"],
+                          card["latest_level"]), ("Tombol Rating A", 2, 100, "excellent"))
+        self.assertNotContains(response, "level-rows level-bar")
+        self.assertContains(response, "100%<small> Sangat Baik</small>")
+        self.assertContains(response, "dari 2 rating")
 
     def test_device_cards_are_paginated(self):
         DeviceList.objects.bulk_create([
@@ -104,10 +108,9 @@ class DashboardTests(TestCase):
         ])
         response = self.client.get("/")
         self.assertEqual(len(response.context["device_cards"]), 20)
-        self.assertEqual(response.context["device_pager"]["page"].paginator.count, 25)
+        self.assertEqual(response.context["device_pager"]["page"].paginator.count, 26)  # + the people counter
         page2 = self.client.get("/", {"dev_page": "2"})
-        self.assertEqual(len(page2.context["device_cards"]), 5)
-        self.assertTrue(page2.context["show_people"])  # the people card shows on every page
+        self.assertEqual(len(page2.context["device_cards"]), 6)
 
     def test_people_counting_overview(self):
         response = self.client.get("/people-counting/")
@@ -132,7 +135,7 @@ class DashboardTests(TestCase):
         self.assertEqual(statuses, {DEVICE_ID: True, "dev-b": False})
         self.assertContains(response, "Sensor tidak dapat dihubungi")
         overview = self.client.get("/")
-        self.assertContains(overview, "1/2 ONLINE")
+        self.assertContains(overview, "badge badge--bad")  # the offline counter's card
 
     def test_all_devices_are_summed(self):
         self.add_people_device("dev-b", "Pintu Belakang", count=3, events=5)
@@ -145,11 +148,11 @@ class DashboardTests(TestCase):
         old = timezone.localtime() - timedelta(days=5)
         EventLog.objects.create(id="old", time=old, device=self.device, event_type="in",
                                 recognition_target="Cross Line")
-        self.assertEqual(self.client.get("/").context["kpis"]["people_in"], 2)
-        self.assertEqual(self.client.get("/", {"range": "7"}).context["kpis"]["people_in"], 3)
+        self.assertEqual(self.client.get("/").context["summary"]["people"]["people_in"], 2)
+        self.assertEqual(self.client.get("/", {"range": "7"}).context["summary"]["people"]["people_in"], 3)
         day = old.date().isoformat()
         custom = self.client.get("/", {"start": day, "end": day})
-        self.assertEqual(custom.context["kpis"]["people_in"], 1)
+        self.assertEqual(custom.context["summary"]["people"]["people_in"], 1)
         self.assertEqual(custom.context["preset"], "")
 
     def test_future_end_is_clamped_to_today(self):
@@ -328,8 +331,8 @@ class DashboardTests(TestCase):
 
     def test_all_levels_sum_their_devices(self):
         self.add_people_device("dev-female", "Wanita", events=5, scope=self.other_scope)
-        self.assertEqual(self.client.get("/").context["kpis"]["people_in"], 7)
-        self.assertEqual(self.client.get("/", {"area": self.area.pk}).context["kpis"]["people_in"], 7)
+        self.assertEqual(self.client.get("/").context["summary"]["people"]["people_in"], 7)
+        self.assertEqual(self.client.get("/", {"area": self.area.pk}).context["summary"]["people"]["people_in"], 7)
         by_scope = self.client.get("/people-counting/", {"scope": self.other_scope.pk})
         self.assertEqual([s["device"].id for s in by_scope.context["sensors"]], ["dev-female"])
         self.assertEqual(by_scope.context["kpis"]["people_in"], 5)
@@ -367,30 +370,47 @@ class DashboardTests(TestCase):
         DeviceList.objects.filter(pk=loose.pk).update(scope=None)
         response = self.client.get("/", {"client": "none"})
         self.assertTrue(response.context["location"]["unassigned"])
-        self.assertEqual(response.context["kpis"]["people_in"], 3)
+        self.assertEqual(response.context["summary"]["people"]["people_in"], 3)
         self.assertContains(response, "Belum diatur")
         # "All locations" includes devices without a Scope.
-        self.assertEqual(self.client.get("/").context["kpis"]["people_in"], 5)
+        self.assertEqual(self.client.get("/").context["summary"]["people"]["people_in"], 5)
 
     # ---------- overview: device lists, sensor filter, ids, total ----------
     def test_sensor_type_filter_and_total_devices(self):
         DeviceList.objects.create(id="soap-a", type="soap", scope=self.scope)
         DeviceList.objects.create(id="trash-a", type="trash", scope=self.scope)
         everything = self.client.get("/")
-        self.assertEqual([c["type"] for c in everything.context["device_cards"]], ["soap", "trash"])
-        self.assertEqual(everything.context["total_devices"], 3)
+        self.assertEqual([c["type"] for c in everything.context["device_cards"]], ["people", "soap", "trash"])
+        self.assertEqual(everything.context["status_counts"]["devices"], 3)
         self.assertNotContains(everything, "jenis sensor aktif")
-        self.assertContains(everything, "Total perangkat: 3")
+        self.assertContains(everything, "<strong>3</strong>")
+        self.assertEqual([(f["label"], f["value"], f["url"]) for f in everything.context["active_filters"]],
+                         [("Periode", "Hari ini", None)])  # the period always shows; today can't be removed
+        self.assertNotContains(everything, "Hapus semua filter")
         soap_only = self.client.get("/", {"sensor": "soap"})
         self.assertEqual([c["type"] for c in soap_only.context["device_cards"]], ["soap"])
-        self.assertFalse(soap_only.context["show_people"])
-        self.assertEqual(soap_only.context["total_devices"], 1)
+        self.assertNotIn(DEVICE_ID, [c["device"].id for c in soap_only.context["device_cards"]])
+        self.assertEqual(soap_only.context["status_counts"]["devices"], 1)
+        self.assertEqual([(f["label"], f["value"]) for f in soap_only.context["active_filters"]],
+                         [("Jenis", "Sabun"), ("Periode", "Hari ini")])
         self.assertIn("sensor=soap", soap_only.context["filter_query"])
-        self.assertEqual(len(self.client.get("/", {"sensor": "bogus"}).context["device_cards"]), 2)
+        self.assertEqual(len(self.client.get("/", {"sensor": "bogus"}).context["device_cards"]), 3)  # ignored: all types
 
-    def test_people_counting_ids_only_when_scope_selected(self):
-        self.assertNotContains(self.client.get("/"), f"ID {DEVICE_ID}")
-        self.assertContains(self.client.get("/", {"scope": self.scope.pk}), f"ID {DEVICE_ID}")
+    def test_people_counter_card_status_counts(self):
+        offline = self.add_people_device("pc-off", "Pintu Belakang")
+        SensorLog.objects.create(device=offline, status=SensorLog.STATUS_OFFLINE, endpoint_url="x", response={})
+        response = self.client.get("/")
+        self.assertContains(response, "Pintu Belakang")
+        # ONLINE counts as normal, OFFLINE as no data.
+        self.assertEqual((response.context["status_counts"]["normal"], response.context["status_counts"]["nodata"]), (1, 1))
+        self.assertEqual([c["device"].id for c in self.client.get("/", {"status": "nodata"}).context["device_cards"]],
+                         ["pc-off"])
+        cards = {c["device"].id: c for c in response.context["device_cards"]}
+        self.assertEqual(cards[DEVICE_ID]["url"],
+                         f"/people-counting/?scope={self.scope.pk}&range=today&st_q={DEVICE_ID}&nt_device={DEVICE_ID}#sensor-table")
+        demo = self.add_people_device("DEMO-PEOPLE-01", "Demo")
+        demo_card = next(c for c in self.client.get("/").context["device_cards"] if c["device"].id == demo.id)
+        self.assertIsNone(demo_card["url"])  # demo/dummy counters are not links
 
     # ---------- auto-refresh ----------
     def test_refresh_interval_comes_from_scheduler_config(self):
@@ -399,18 +419,14 @@ class DashboardTests(TestCase):
         config.save()
         self.assertContains(self.client.get("/people-counting/"), 'data-refresh-seconds="45"')
 
-    def test_stale_banner_when_sensor_data_stopped(self):
+    def test_no_banner_when_sensor_data_is_old(self):
         log = SensorLog.objects.create(device=self.device, status=SensorLog.STATUS_ONLINE, endpoint_url="zk")
         SensorLog.objects.filter(pk=log.pk).update(time=timezone.now() - timedelta(minutes=30))
         response = self.client.get("/")
-        self.assertEqual(response.context["stale"]["minutes"], 30)
-        self.assertContains(response, "30 menit lalu")
-
-    def test_no_stale_banner_when_fresh_or_range_in_past(self):
-        SensorLog.objects.create(device=self.device, status=SensorLog.STATUS_ONLINE, endpoint_url="zk")
-        self.assertIsNone(self.client.get("/").context["stale"])
-        yesterday = (timezone.localdate() - timedelta(days=1)).isoformat()
-        self.assertIsNone(self.client.get("/", {"start": yesterday, "end": yesterday}).context["stale"])
+        self.assertNotIn("stale", response.context)
+        self.assertNotContains(response, "menit lalu")
+        self.assertContains(response, "Semua Perangkat")
+        self.assertContains(response, 'class="section-divider"')
 
     def test_hourly_axis_ticks_are_split_from_the_peak(self):
         response = self.client.get("/people-counting/")
@@ -620,16 +636,31 @@ class DashboardTests(TestCase):
         DeviceList.objects.create(id="trash-x9", type="trash", name="Sampah", scope=self.scope)
         by_name = self.client.get("/", {"q": "wastafel"})
         self.assertEqual([c["device"].id for c in by_name.context["device_cards"]], ["soap-a"])
-        self.assertFalse(by_name.context["show_people"])
-        self.assertEqual(by_name.context["total_devices"], 1)
+
+        self.assertEqual(by_name.context["status_counts"]["devices"], 1)
         by_id = self.client.get("/", {"q": "X9"})
         self.assertEqual([c["device"].id for c in by_id.context["device_cards"]], ["trash-x9"])
         people = self.client.get("/", {"q": DEVICE_ID[-6:]})
-        self.assertTrue(people.context["show_people"])
-        self.assertEqual(people.context["device_cards"], [])
+        self.assertEqual([c["device"].id for c in people.context["device_cards"]], [DEVICE_ID])
         self.assertIn("q=", people.context["filter_query"])
         none = self.client.get("/", {"q": "zzz"})
         self.assertContains(none, "Tidak ada perangkat yang cocok")
+
+    def test_active_filter_chips_for_location_period_and_search(self):
+        response = self.client.get("/", {"scope": self.scope.pk, "range": "7", "q": "sab"})
+        chips = {f["label"]: f for f in response.context["active_filters"]}
+        self.assertEqual(chips["Lokasi"]["value"], "BCA › Jakarta › Thamrin › Gedung A › Floor 10 - Toilet Pria West")
+        self.assertEqual(chips["Periode"]["value"], "7 hari")
+        self.assertEqual(chips["Cari"]["value"], "“sab”")
+        self.assertNotIn("scope=", chips["Lokasi"]["url"])
+        self.assertContains(response, "Hapus semua filter")
+
+    def test_search_forms_have_a_button_and_keep_other_params(self):
+        response = self.client.get("/", {"range": "7", "q": "abc", "dev_page": "2"})
+        self.assertContains(response, '<button type="submit" class="btn btn--primary">Cari</button>')
+        self.assertContains(response, '<input type="hidden" name="range" value="7">')
+        self.assertNotContains(response, '<input type="hidden" name="dev_page"')
+        self.assertContains(self.client.get("/people-counting/"), '<button type="submit" class="btn btn--primary">Cari</button>')
 
     def test_overview_search_lists_matching_locations(self):
         response = self.client.get("/", {"q": "toilet wanita"})
@@ -661,39 +692,83 @@ class DashboardTests(TestCase):
         soap = summary["blocks"]["soap"]
         self.assertEqual(soap["counts"], {"critical": 1, "warning": 1, "normal": 0, "nodata": 2})
         self.assertEqual(soap["average_level"], 10)
-        self.assertEqual(summary["blocks"]["trash"]["gauge"], "40")
+        self.assertEqual(summary["blocks"]["trash"]["average_level"], 80)
+        self.assertEqual(summary["blocks"]["soap"]["notifications"], 0)  # only people counting sends today
+        self.assertNotContains(response, "berhasil ·")  # people card: total only
+        self.assertNotContains(response, "Terakhir ")  # device cards: no last-time line
         self.assertEqual((summary["kpis"]["critical"], summary["kpis"]["warning"], summary["kpis"]["nodata"],
                           summary["kpis"]["low_battery"]), (1, 2, 2, 1))
         self.assertEqual([row["device"].id for row in summary["critical"]], ["soap-a"])
         since = timezone.localtime(summary["critical"][0]["since"])
         self.assertAlmostEqual((timezone.now() - since).total_seconds() / 60, 90, delta=1)  # streak start
         self.assertEqual(summary["people"]["people_in"], 2)
-        self.assertEqual(summary["people"]["trend"]["unit"], "hour")  # today: per hour up to now
-        self.assertEqual(len(summary["people"]["trend"]["values"]), timezone.localtime().hour + 1)
+        trend = summary["people"]["trend"]
+        self.assertEqual(trend["unit"], "hour")  # today: per hour up to now
+        self.assertEqual(len(trend["bars"]), timezone.localtime().hour + 1)
+        self.assertEqual((trend["peak"]["count"], trend["peak"]["pct"]), (2, "100.0"))
+        self.assertEqual(sum(bar["show_label"] for bar in trend["bars"]), len({0, len(trend["bars"]) // 2, len(trend["bars"]) - 1}))
         week = self.client.get("/", {"range": "7"}).context["summary"]["people"]["trend"]
-        self.assertEqual((week["unit"], len(week["values"]), week["values"][-1]), ("day", 7, 2))
-        self.assertContains(response, "Pengunjung per jam")
+        self.assertEqual((week["unit"], len(week["bars"]), week["bars"][-1]["count"]), ("day", 7, 2))
+        self.assertContains(response, "Jam tersibuk:")
+        self.assertContains(response, "Rata-rata kepenuhan 80%")
         self.assertContains(response, "Ringkasan sensor")
-        self.assertContains(response, "Semua sensor")
+        self.assertContains(response, "Semua Perangkat")
         self.assertContains(response, 'href="?&amp;range=today&status=critical#all-sensors"')
+        self.assertEqual(summary["kpis"]["normal"], 0)
+        self.assertContains(response, 'href="?&amp;range=today#all-sensors"')  # total -> all sensors, no status
+        self.assertContains(response, 'href="?&amp;range=today&status=normal#all-sensors"')
         # Clicking a status narrows the cards below.
         only = self.client.get("/", {"status": "nodata", "sensor": "soap"})
         self.assertEqual(sorted(c["device"].id for c in only.context["device_cards"]), ["soap-c", "soap-d"])
-        self.assertFalse(only.context["show_people"])
-        self.assertContains(only, "Disaring: Tidak ada data")
+        self.assertNotIn(DEVICE_ID, [c["device"].id for c in only.context["device_cards"]])
+        self.assertEqual([(f["label"], f["value"]) for f in only.context["active_filters"]],
+                         [("Status", "Tidak ada data"), ("Jenis", "Sabun"), ("Periode", "Hari ini")])
+        self.assertEqual(only.context["status_counts"]["nodata"], 2)
+        self.assertContains(only, "summary-kpi--nodata is-active")
+        # Each chip drops only its own filter.
+        self.assertEqual(only.context["active_filters"][0]["url"], "?sensor=soap#all-sensors")
         battery = self.client.get("/", {"status": "battery"})
         self.assertEqual([c["device"].id for c in battery.context["device_cards"]], ["soap-a"])
-        # The summary ignores the type filter and the search.
-        self.assertEqual(self.client.get("/", {"sensor": "trash", "q": "zzz"}).context["summary"]["kpis"]["devices"], 6)
+        self.assertContains(battery, "🔋 12%")
+        self.assertNotContains(battery, "diukur")
+        everything = self.client.get("/")  # the battery badge shows on every reading card, any filter
+        self.assertContains(everything, "badge badge--warn\">🔋 12%")
+        self.assertContains(everything, "badge badge--ok\">🔋 80%")
+        SensorReading.objects.create(device=trash, time=timezone.now(), level=10, severity="normal", condition="Normal")
+        self.assertContains(self.client.get("/"), "🔋 –")  # a reading without battery
+        # The type filter narrows the summary too (only that type's card); the search doesn't.
+        trash_only = self.client.get("/", {"sensor": "trash", "q": "zzz"}).context["summary"]
+        self.assertEqual((trash_only["kpis"]["devices"], sorted(trash_only["blocks"]), trash_only["people"]),
+                         (1, ["trash"], None))
+        self.assertIn("sensor=trash", self.client.get("/", {"sensor": "trash"}).context["summary_query"])
+        # With one type selected, empty lists are hidden; with all types they always show.
+        self.assertContains(self.client.get("/", {"sensor": ""}), "Tidak ada sensor yang perlu tindakan.", count=0)
+        self.assertContains(self.client.get("/", {"range": "today"}), "class=\"summary-lists\"")
+        trash_page = self.client.get("/", {"sensor": "trash"})
+        self.assertNotContains(trash_page, 'class="summary-lists')  # trash: nothing critical, battery fine
+        soap_page = self.client.get("/", {"sensor": "soap"})
+        self.assertContains(soap_page, 'class="summary-lists"')  # soap-a: critical and low battery
+        DeviceList.objects.filter(id="soap-a").delete()
+        self._reading(soap_b, 0, "critical", "Habis")
+        single = self.client.get("/", {"sensor": "soap"})
+        self.assertContains(single, "summary-lists summary-lists--single")
+        self.assertNotContains(single, "Semua baterai aman.")
 
-    def test_sensor_summary_satisfaction_stars(self):
+    def test_sensor_summary_satisfaction_levels(self):
+        from dashboard import queries
+
+        self.assertEqual([queries.rating_level(r) for r in (5, 4, 3, 2, 1)],
+                         ["excellent", "excellent", "average", "bad", "bad"])
         feedback = DeviceList.objects.create(id="fb-a", type="satisfaction", scope=self.scope)
-        for rating in (5, 5, 4, 1):
+        for rating in (5, 5, 4, 3, 1):
             CustomerResponse.objects.create(device=feedback, time=timezone.localtime(), rating=rating)
-        satisfaction = self.client.get("/").context["summary"]["satisfaction"]
-        self.assertEqual((satisfaction["average"], satisfaction["count"]), (3.75, 4))
-        self.assertEqual([(s["stars"], s["count"], s["pct"]) for s in satisfaction["stars"]],
-                         [(5, 2, "100.0"), (4, 1, "50.0"), (3, 0, "0.0"), (2, 0, "0.0"), (1, 1, "50.0")])
+        response = self.client.get("/")
+        satisfaction = response.context["summary"]["satisfaction"]
+        self.assertEqual((satisfaction["total"], satisfaction["excellent_pct"]), (5, 60))
+        self.assertEqual([(l["level"], l["count"], l["pct"]) for l in satisfaction["levels"]],
+                         [("excellent", 3, 60), ("average", 1, 20), ("bad", 1, 20)])
+        self.assertContains(response, "60%<small> Sangat Baik</small>")
+        self.assertContains(response, "Buruk")
 
     def test_busiest_hour(self):
         chart = self.client.get("/people-counting/").context["chart"]
@@ -721,7 +796,7 @@ class DashboardTests(TestCase):
         self.assertEqual(response.cookies["wd_lang"].value, "en")
         follow_up = self.client.get("/")
         self.assertContains(follow_up, "Sensor summary")
-        self.assertContains(follow_up, "Total devices:")
+        self.assertContains(follow_up, "Total devices")
 
     def test_english_export(self):
         self.client.cookies["wd_lang"] = "en"

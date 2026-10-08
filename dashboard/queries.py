@@ -125,15 +125,6 @@ def online_donut(online, total):
     return segments
 
 
-def last_successful_sync(devices):
-    """Time of the newest successful ZK request for any of the devices, or None."""
-    log = (SensorLog.objects.filter(device__in=devices, status=SensorLog.STATUS_ONLINE)
-           .order_by("-time").first())
-    return log.time if log else None
-
-
-# ---------- KPIs & chart ----------
-
 def visitors_in(devices, start, end):
     since, until = range_bounds(start, end)
     return (EventLog.objects.filter(device__in=devices, time__gte=since, time__lt=until)
@@ -434,6 +425,29 @@ def events(devices, start, end, time_from=None, time_to=None, event_type=""):
 
 # ---------- other modules (washroom API data) ----------
 
+# Satisfaction has 3 levels. The API still takes a 1-5 rating until the sensor team's spec arrives;
+# this mapping is the only place to change when they send levels instead.
+RATING_LEVELS = ["excellent", "average", "bad"]
+
+
+def rating_level(rating):
+    """excellent (4-5) / average (3) / bad (1-2)."""
+    return "excellent" if rating >= 4 else "average" if rating == 3 else "bad"
+
+
+def rating_levels(responses):
+    """Counts and shares per level for a CustomerResponse queryset, plus the % excellent."""
+    counts = dict.fromkeys(RATING_LEVELS, 0)
+    for rating, n in responses.values("rating").annotate(n=Count("id")).values_list("rating", "n"):
+        counts[rating_level(rating)] += n
+    total = sum(counts.values())
+    levels = [{"level": level, "count": counts[level],
+               "pct": round(counts[level] * 100 / total) if total else 0,
+               "width": f"{counts[level] * 100 / total:.2f}" if total else "0"}
+              for level in RATING_LEVELS]
+    return {"total": total, "levels": levels, "excellent_pct": levels[0]["pct"] if total else None}
+
+
 def device_cards(device_filter, start, end, types):
     """One overview card per washroom sensor (every type in `types` except people counting), ordered by
     type then name: latest reading in the range, or the rating summary for satisfaction devices.
@@ -450,25 +464,19 @@ def device_cards(device_filter, start, end, types):
     last_reading = {r.device_id: r for r in readings.order_by("device_id", "-time", "-id").distinct("device_id")}
     responses = CustomerResponse.objects.filter(device__in=devices, time__gte=since, time__lt=until)
     last_response = {r.device_id: r for r in responses.order_by("device_id", "-time", "-id").distinct("device_id")}
-    ratings = {row.pop("device"): row for row in responses.values("device")
-               .annotate(average=Avg("rating"), count=Count("id"))}
 
     cards = []
     for device in devices:
         card = {"device": device, "type": device.type, "location": _location_label(device), "has_data": False}
         if device.type == SATISFACTION_TYPE:
-            stats = ratings.get(device.id)
-            if stats:
-                card.update(has_data=True, average_rating=stats["average"], response_count=stats["count"],
-                            rating_progress=round(stats["average"] * 20), latest=last_response[device.id])
+            latest = last_response.get(device.id)
+            if latest:
+                card.update(has_data=True, ratings=rating_levels(responses.filter(device=device)),
+                            latest=latest, latest_level=rating_level(latest.rating))
         else:
             reading = last_reading.get(device.id)
             if reading:
-                card.update(
-                    has_data=True, latest=reading,
-                    level_progress=(max(0, min(round(reading.level), 100))
-                                    if reading.level is not None and device.type != "ammonia" else None),
-                )
+                card.update(has_data=True, latest=reading)
         cards.append(card)
     return cards
 
@@ -481,7 +489,6 @@ LOW_BATTERY = 20  # %, below this a sensor is listed under "Baterai lemah"
 NO_DATA_AFTER = timedelta(hours=2)  # sensors send every 30 min; older than this (today) = no data
 SUMMARY_LIST_LIMIT = 5
 DONUT_GAP = 0.6  # % of the ring left blank between segments
-AMMONIA_SCALE = 40  # ppm at the right end of the ammonia scale
 
 
 def latest_readings(devices, until):
@@ -533,39 +540,52 @@ def _critical_since(device, reading):
     return first.order_by("time").values_list("time", flat=True).first() or reading.time
 
 
+TREND_LABELS = 3  # axis labels under the summary's mini bars: first, middle, last
+
+
 def visitor_trend(devices, start, end):
-    """IN visitors over the selected range for the summary sparkline: per hour for a single day,
-    otherwise per day. SVG polyline points use viewBox 0 0 100 32."""
+    """IN visitors over the selected range as mini bars for the summary card: per hour for a single
+    day (today only up to the current hour), otherwise per day. Each bar has a label (hour or date) and
+    a height %; the busiest one is flagged and returned as `peak`."""
     if start == end:
-        values = [bar["count"] for bar in hourly(devices, start, end)["bars"]]
+        counts = [bar["count"] for bar in hourly(devices, start, end)["bars"]]
         if end == timezone.localdate():
-            values = values[:timezone.localtime().hour + 1]  # the rest of today hasn't happened yet
+            counts = counts[:timezone.localtime().hour + 1]  # the rest of today hasn't happened yet
+        labels = [f"{hour:02d}:00" for hour in range(len(counts))]
         unit = "hour"
     else:
         since, until = range_bounds(start, end)
         tz = timezone.get_current_timezone()
-        counts = dict(
+        per_day = dict(
             EventLog.objects.filter(device__in=devices, time__gte=since, time__lt=until).filter(COUNTED_EVENTS)
             .annotate(day=TruncDate("time", tzinfo=tz)).values("day").annotate(n=Count("id"))
             .values_list("day", "n")
         )
-        values = [counts.get(start + timedelta(days=i), 0) for i in range((end - start).days + 1)]
+        days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+        counts = [per_day.get(day, 0) for day in days]
+        labels = days
         unit = "day"
-    peak = max(values, default=0) or 1
-    step = 100 / max(len(values) - 1, 1)
-    points = " ".join(f"{i * step:.1f},{30 - v * 26 / peak:.1f}" for i, v in enumerate(values))
-    return {"values": values, "points": points, "unit": unit}
+    top = max(counts, default=0)
+    peak_index = counts.index(top) if top else None
+    marks = {0, len(counts) // 2, len(counts) - 1} if counts else set()
+    bars = [{"count": n, "label": label, "pct": f"{n * 100 / top:.1f}" if top else "0",
+             "peak": i == peak_index, "show_label": i in marks}
+            for i, (n, label) in enumerate(zip(counts, labels))]
+    return {"bars": bars, "unit": unit, "peak": bars[peak_index] if peak_index is not None else None}
 
 
-def sensor_summary(device_filter, start, end):
-    """Analytics above the overview's device cards, for the location and date range only (the type
-    filter and search don't apply). Washroom sensors use their latest reading up to the end of the
+def sensor_summary(device_filter, start, end, sensor_type=""):
+    """Analytics above the overview's device cards, for the location, date range and the "Jenis Sensor"
+    filter (`sensor_type`, "" = all; the search doesn't apply). Washroom sensors use their latest reading up to the end of the
     range; people counting and satisfaction use the range. Returns per-type blocks, overall KPIs, the
     critical ("perlu tindakan") and low-battery lists, and `status_by_device` for the card filter."""
     since, until = range_bounds(start, end)
     now = timezone.now()
     live = end >= timezone.localdate()
-    devices = list(DeviceList.objects.filter(**device_filter).select_related("scope__area"))
+    devices = DeviceList.objects.filter(**device_filter).select_related("scope__area")
+    if sensor_type:
+        devices = devices.filter(type=sensor_type)
+    devices = list(devices)
     rules = list(StatusRule.objects.all())
     reading_devices = [d for d in devices if d.type in READING_TYPES]
     latest = latest_readings(reading_devices, min(until, now))
@@ -589,7 +609,12 @@ def sensor_summary(device_filter, start, end):
         if reading is not None and reading.battery is not None and reading.battery < LOW_BATTERY:
             low_battery.append({"device": device, "reading": reading, "location": _location_label(device)})
 
+    # Notifications sent per sensor type in the range. Only people counting sends Work Orders today, so
+    # the other types show 0 until they get their own notifications (then this fills in by itself).
+    sent_by_type = dict(NotificationLog.objects.filter(device__in=devices, time__gte=since, time__lt=until)
+                        .values("device__type").annotate(n=Count("id")).values_list("device__type", "n"))
     for block in blocks.values():
+        block["notifications"] = sent_by_type.get(block["type"], 0)
         labels = _status_labels(block["type"], rules)
         block["statuses"] = [
             {"status": s, "label": labels.get(s), "count": block["counts"][s],
@@ -598,26 +623,13 @@ def sensor_summary(device_filter, start, end):
         ]
         block["average_level"] = round(sum(block["levels"]) / len(block["levels"])) if block["levels"] else None
         block["donut"] = _donut(block["counts"], block["total"])
-        if block["average_level"] is not None:
-            block["gauge"] = f"{max(0, min(block['average_level'], 100)) / 2:g}"  # a half ring is 50 of 100
-        if block["worst"] is not None:
-            # Ammonia: marker for the highest ppm and the Normal / Bau / Bahaya zone bounds from the rules.
-            block["marker"] = f"{min(block['worst']['level'], AMMONIA_SCALE) * 100 / AMMONIA_SCALE:g}"
-            bounds = sorted({r.max_level for r in rules if r.sensor_type == block["type"] and r.max_level is not None})
-            block["zones"] = [f"{min(b, AMMONIA_SCALE) * 100 / AMMONIA_SCALE:g}" for b in bounds]
 
     satisfaction = None
     rating_devices = [d for d in devices if d.type == SATISFACTION_TYPE]
     if rating_devices:
         responses = CustomerResponse.objects.filter(device__in=rating_devices, time__gte=since, time__lt=until)
-        stats = responses.aggregate(average=Avg("rating"), count=Count("id"))
-        per_star = dict(responses.values("rating").annotate(n=Count("id")).values_list("rating", "n"))
-        top = max(per_star.values(), default=0) or 1
-        satisfaction = {
-            "devices": len(rating_devices), "average": stats["average"], "count": stats["count"],
-            "stars": [{"stars": s, "count": per_star.get(s, 0), "pct": f"{per_star.get(s, 0) * 100 / top:.1f}"}
-                      for s in range(5, 0, -1)],
-        }
+        satisfaction = {"devices": len(rating_devices), **rating_levels(responses),
+                        "notifications": sent_by_type.get(SATISFACTION_TYPE, 0)}
 
     people = None
     people_devices = [d for d in devices if d.type == DeviceList.TYPE_PEOPLE]
@@ -634,7 +646,7 @@ def sensor_summary(device_filter, start, end):
         "people": people,
         "satisfaction": satisfaction,
         "kpis": {"devices": len(devices), "critical": counts["critical"], "warning": counts["warning"],
-                 "nodata": counts["nodata"], "low_battery": len(low_battery)},
+                 "normal": counts["normal"], "nodata": counts["nodata"], "low_battery": len(low_battery)},
         "critical": critical[:SUMMARY_LIST_LIMIT],
         "critical_total": len(critical),
         "low_battery": low_battery[:SUMMARY_LIST_LIMIT],

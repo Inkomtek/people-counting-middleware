@@ -6,6 +6,7 @@ import tablib
 from django.core.paginator import Paginator
 from django.http import Http404, HttpResponse
 from django.shortcuts import render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_time
 from django.utils.formats import date_format
@@ -114,26 +115,12 @@ def _module_devices(ctx, module, selected_id=""):
     return [selected] if selected else devices
 
 
-def _stale_alert(ctx, devices):
-    """Minutes since sensor data last arrived, when that is too long ago to trust today's figures."""
-    if not ctx["includes_today"] or not devices:
-        return None
-    last = queries.last_successful_sync(devices)
-    # Stale after three missed syncs, but never sooner than 5 minutes.
-    threshold = max(5, 3 * ctx["sync_interval_seconds"] / 60)
-    if last is None:
-        return {"never": True}
-    minutes = int((timezone.now() - last).total_seconds() // 60)
-    return {"time": last, "minutes": minutes} if minutes > threshold else None
-
-
 def _sensor_context(ctx, devices):
     statuses = queries.sensor_statuses(devices)
     ctx.update(
         sensors=statuses,
         online_count=sum(s["online"] for s in statuses),
         offline_sensors=[s for s in statuses if not s["online"]],
-        stale=_stale_alert(ctx, devices),
     )
 
 
@@ -220,7 +207,6 @@ def overview(request, lang):
         ctx["location_query"] += f"&{urlencode({'q': q})}"
         ctx["filter_query"] += f"&{urlencode({'q': q})}"
     _sensor_context(ctx, devices)
-    ctx["kpis"] = queries.kpis(devices, ctx["start"], ctx["end"])
     device_filter = ctx["location"]["device_filter"]
     t = ctx["t"]
 
@@ -233,51 +219,111 @@ def overview(request, lang):
         ctx["filter_query"] += f"&sensor={sensor}"
     types = [section["key"] for section in SECTIONS if not sensor or section["key"] == sensor]
 
-    # People counting stays one combined card shown first; every other sensor gets its own card in the
-    # same grid (ordered by type, then name) and is paginated. Types without devices are not shown.
-    # Sensor Summary: location + dates only (the type filter and search narrow the cards below).
-    summary = queries.sensor_summary(device_filter, ctx["start"], ctx["end"])
+    # One card per device (people counting first, then the other types; by name), paginated.
+    # Sensor Summary: location, dates and the type filter (the search only narrows the cards below).
+    summary = queries.sensor_summary(device_filter, ctx["start"], ctx["end"], sensor)
     # Clicking a status in the summary narrows the cards to it (?status=critical|warning|normal|nodata|battery).
     status = request.GET.get("status", "")
     if status not in (*queries.STATUSES, "battery"):
         status = ""
 
     cards = queries.device_cards(device_filter, ctx["start"], ctx["end"], types)
-    if status == "battery":
-        cards = [card for card in cards if card["device"].id in summary["low_battery_ids"]]
-    elif status:
-        cards = [card for card in cards if summary["status_by_device"].get(card["device"].id) == status]
+    if DeviceList.TYPE_PEOPLE in types:
+        people_cards = [{"device": row["device"], "type": DeviceList.TYPE_PEOPLE, "location": row["location"],
+                         "has_data": True, "people": row, "url": _people_card_url(row["device"], ctx)}
+                        for row in sorted(queries.sensor_table(devices, ctx["start"], ctx["end"]),
+                                          key=lambda r: (r["device"].name or r["device"].id, r["device"].id))]
+        cards = people_cards + cards
+    # People counters have no reading: ONLINE counts as normal, OFFLINE as no data.
+    card_status = dict(summary["status_by_device"])
+    card_status.update({card["device"].id: "normal" if card["people"]["online"] else "nodata"
+                        for card in cards if card["type"] == DeviceList.TYPE_PEOPLE})
     if q:
         needle = q.lower()
         cards = [card for card in cards if needle in card["device"].id.lower() or needle in (card["device"].name or "").lower()]
+    # The 6 status boxes above the cards count what the cards show before the status filter
+    # (location, dates, type and search all apply), so a box's number matches its result.
+    statuses = [card_status.get(card["device"].id) for card in cards]
+    status_counts = {
+        "devices": len(cards),
+        **{key: statuses.count(key) for key in queries.STATUSES},
+        "battery": sum(card["device"].id in summary["low_battery_ids"] for card in cards),
+    }
+    if status == "battery":
+        cards = [card for card in cards if card["device"].id in summary["low_battery_ids"]]
+    elif status:
+        cards = [card for card in cards if card_status.get(card["device"].id) == status]
     page, pager = _paginate(request, cards, "dev_", DETAIL_PAGE_SIZE, "devices")
     icons = {section["key"]: section["icon"] for section in SECTIONS}
     for card in page:
         card["icon"] = icons[card["type"]]
-    total = DeviceList.objects.filter(**device_filter)
-    if q:
-        total = total.filter(queries.search_devices(q))
     ctx.update(
         sensor=sensor,
         sensor_options=[(section["key"], t[f"module_{section['key']}"]) for section in SECTIONS],
-        show_people=DeviceList.TYPE_PEOPLE in types and bool(devices) and not status,
-        people_name=t["module_people"],
         device_cards=list(page),
         device_pager=pager,
-        total_devices=(total.filter(type=sensor) if sensor else total).count(),
+        status_counts=status_counts,
+        status_boxes=[("devices", ""), ("critical", "critical"), ("warning", "warning"), ("normal", "normal"),
+                      ("nodata", "nodata"), ("battery", "battery")],
+        active_filters=_active_filters(request, ctx, sensor, status, q),
         # Inside one toilet the cards drop the location line (the title already names it).
         scope_selected=ctx["location"]["selected"]["scope"] is not None,
         q=q,
+        # The search form (no-JS fallback) resubmits every other parameter unchanged.
+        search_hidden=[(key, value) for key, values in request.GET.lists() if key not in ("q", "dev_page")
+                       for value in values],
         location_matches=queries.search_locations(q) if q else [],
         summary=summary,
-        paper_types=["toilet-paper", "tissue"],
+        sensor_all=not sensor,  # "Semua jenis": the summary lists always show, even when empty
         low_battery_limit=queries.LOW_BATTERY,
         status=status,
         status_label=t[f"status_{status}"] if status else "",
         # Base for the summary's status links: location + dates (+ type), never the search.
-        summary_query=ctx["filter_query"].split("&q=")[0],
+        summary_query=f"{ctx['location']['query']}&{ctx['range_query']}" + (f"&sensor={sensor}" if sensor else ""),
     )
     return render(request, "dashboard/overview.html", ctx)
+
+
+DEMO_PREFIXES = ("DEMO-", "DUMMY-")
+
+
+def _people_card_url(device, ctx):
+    """A real people counter's card opens People Counting for its toilet (or the unassigned group),
+    focused on it in the sensor table and the notification chart; demo/dummy devices are not links."""
+    if device.id.upper().startswith(DEMO_PREFIXES):
+        return None
+    where = f"scope={device.scope_id}" if device.scope_id else f"client={locations.UNASSIGNED}"
+    focus = urlencode({"st_q": device.id, "nt_device": device.id})
+    return f"{reverse('dashboard:people_counting')}?{where}&{ctx['range_query']}&{focus}#sensor-table"
+
+
+def _active_filters(request, ctx, sensor, status, q):
+    """Chips for the "Disaring" line above All Devices: each active filter with a link that drops just
+    that filter. The period is always shown; "today" is the default, so its chip has no link."""
+    t = ctx["t"]
+    location = ctx["location"]
+
+    def without(*keys):
+        return f"?{_query_without(request, (*keys, 'dev_page'))}#all-sensors"
+
+    chips = []
+    if status:
+        chips.append({"label": t["filter_status"], "value": t[f"status_{status}"], "url": without("status")})
+    if sensor:
+        chips.append({"label": t["filter_type"], "value": t[f"module_{sensor}"], "url": without("sensor")})
+    if location["unassigned"]:
+        chips.append({"label": t["filter_location"], "value": t["unassigned"], "url": without(*locations.LEVELS)})
+    elif location["title"]:
+        names = [obj.name for obj in location["selected"].values() if obj]
+        chips.append({"label": t["filter_location"], "value": " › ".join(names), "url": without(*locations.LEVELS)})
+    preset = "today" if ctx["is_today"] else ctx["preset"]
+    value = (t[f"preset_{preset}"] if preset else
+             f"{date_format(ctx['start'], 'd M Y')} – {date_format(ctx['end'], 'd M Y')}")
+    chips.append({"label": t["filter_period"], "value": value,
+                  "url": None if preset == "today" else without("range", "start", "end")})
+    if q:
+        chips.append({"label": t["filter_search"], "value": f"“{q}”", "url": without("q")})
+    return chips
 
 
 def _notification_traffic(devices, start, end):

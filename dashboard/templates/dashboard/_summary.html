@@ -8,26 +8,17 @@ that suits its data, then the "needs action" and "low battery" lists. Status lin
     <span class="muted small">{% if summary.live %}{{ t.summary_now }}{% else %}{{ t.summary_at_end }}{% endif %} · {% include "dashboard/_period.html" %}</span>
   </div>
 
-  <div class="summary-kpis">
-    <div class="card summary-kpi"><span class="muted small">{{ t.kpi_devices }}</span><strong>{{ summary.kpis.devices|intcomma }}</strong></div>
-    <a class="card summary-kpi summary-kpi--critical" href="?{{ summary_query }}&status=critical#all-sensors"><span class="muted small">{{ t.kpi_critical }}</span><strong>{{ summary.kpis.critical|intcomma }}</strong></a>
-    <a class="card summary-kpi summary-kpi--warning" href="?{{ summary_query }}&status=warning#all-sensors"><span class="muted small">{{ t.status_warning }}</span><strong>{{ summary.kpis.warning|intcomma }}</strong></a>
-    <a class="card summary-kpi summary-kpi--nodata" href="?{{ summary_query }}&status=nodata#all-sensors"><span class="muted small">{{ t.status_nodata }}</span><strong>{{ summary.kpis.nodata|intcomma }}</strong></a>
-    <a class="card summary-kpi summary-kpi--battery" href="?{{ summary_query }}&status=battery#all-sensors"><span class="muted small">{{ t.status_battery }}</span><strong>{{ summary.kpis.low_battery|intcomma }}</strong></a>
-  </div>
-
   <div class="summary-grid">
     {% if summary.people %}{% with p=summary.people %}
     <a class="card summary-card summary-card--link" href="{% url 'dashboard:people_counting' %}?{{ summary_query }}">
       <div class="summary-head">
         <span class="section-icon">{% include "dashboard/_icon.html" with name="people" %}</span>
         <h3>{{ t.module_people }}</h3>
-        <span class="badge {% if p.online == p.devices %}badge--ok{% else %}badge--warn{% endif %}"><i class="dot"></i>{% tr "n_online" n=p.online total=p.devices %}</span>
+        <span class="chip">{% tr "n_devices" n=p.devices %}</span>
       </div>
       <div class="summary-metric"><strong>{{ p.people_in|intcomma }}</strong><span class="muted small">{{ t.visitors_in_range_card }}</span></div>
-      <svg class="sparkline" viewBox="0 0 100 32" preserveAspectRatio="none" aria-label="{% if p.trend.unit == 'hour' %}{{ t.visitors_per_hour_trend }}{% else %}{{ t.visitors_per_day_trend }}{% endif %}"><polyline points="{{ p.trend.points }}"/></svg>
-      <span class="muted small">{% if p.trend.unit == "hour" %}{{ t.visitors_per_hour_trend }}{% else %}{{ t.visitors_per_day_trend }}{% endif %} · {% include "dashboard/_period.html" %}</span>
-      <div class="summary-foot small"><span class="muted">{{ t.notifications_sent }}</span><span>{% tr "n_success_failed" n=p.wo_sent|intcomma s=p.wo_success|intcomma f=p.wo_failed|intcomma %}</span></div>
+      {% if p.trend.peak %}<p class="summary-note small"><span class="muted">{% if p.trend.unit == "hour" %}{% tr "busiest_hour" hour=p.trend.peak.label n=p.trend.peak.count|intcomma %}{% else %}{% tr "busiest_day" day=p.trend.peak.label|date:"D, d M" n=p.trend.peak.count|intcomma %}{% endif %}</span></p>{% endif %}
+      <div class="summary-foot small"><span class="muted">{{ t.notifications_sent }}</span><strong>{{ p.wo_sent|intcomma }}</strong></div>
     </a>
     {% endwith %}{% endif %}
 
@@ -38,85 +29,28 @@ that suits its data, then the "needs action" and "low battery" lists. Status lin
         <h3>{{ t.module_satisfaction }}</h3>
         <span class="chip">{% tr "n_devices" n=s.devices %}</span>
       </div>
-      {% if s.count %}
-      <div class="summary-metric"><strong>★ {{ s.average|floatformat:1 }}<small>/ 5</small></strong><span class="muted small">{% tr "average_ratings" n=s.count|intcomma %}</span></div>
-      <div class="stars">
-        {% for row in s.stars %}<div class="stars-row small"><span>{{ row.stars }}★</span><span class="stars-bar"><span style="width: {{ row.pct }}%"></span></span><span class="muted">{{ row.count|intcomma }}</span></div>{% endfor %}
-      </div>
+      {% if s.total %}
+      <div class="summary-metric"><strong>{{ s.excellent_pct }}%<small> {{ t.level_excellent }} · {% tr "of_n_ratings" n=s.total|intcomma %}</small></strong></div>
+      {% include "dashboard/_rating_levels.html" with ratings=s %}
       {% else %}<p class="muted small">{{ t.no_ratings_in_range }}</p>{% endif %}
+      <div class="summary-foot small"><span class="muted">{{ t.notifications_sent }}</span><strong>{{ s.notifications|intcomma }}</strong></div>
     </div>
     {% endwith %}{% endif %}
 
-    {% with b=summary.blocks.soap %}{% if b %}
-    <div class="card summary-card">
-      <div class="summary-head">
-        <span class="section-icon">{% include "dashboard/_icon.html" with name="soap" %}</span>
-        <h3>{{ t.module_soap }}</h3>
-      </div>
-      <div class="donut-wrap">
-        <svg class="donut" viewBox="0 0 42 42" role="img" aria-label="{{ t.module_soap }}">
-          <circle class="donut-track" cx="21" cy="21" r="15.915"/>
-          {% for seg in b.donut %}<circle class="donut-seg status-{{ seg.status }}" cx="21" cy="21" r="15.915" stroke-dasharray="{{ seg.dash }}" stroke-dashoffset="{{ seg.offset }}"/>{% endfor %}
-          <text x="21" y="21" class="donut-total">{{ b.total }}</text>
-          <text x="21" y="27" class="donut-caption">{{ t.devices_short }}</text>
-        </svg>
-        {% include "dashboard/_status_legend.html" with b=b type="soap" %}
-      </div>
-    </div>
-    {% endif %}{% endwith %}
+    {% with b=summary.blocks.soap %}{% if b %}{% include "dashboard/_donut_card.html" with key="soap" icon="soap" %}{% endif %}{% endwith %}
+    {% with b=summary.blocks|get:"toilet-paper" %}{% if b %}{% include "dashboard/_donut_card.html" with key="toilet-paper" icon="paper" %}{% endif %}{% endwith %}
+    {% with b=summary.blocks.tissue %}{% if b %}{% include "dashboard/_donut_card.html" with key="tissue" icon="tissue" %}{% endif %}{% endwith %}
 
-    {% if summary.blocks|get:"toilet-paper" or summary.blocks.tissue %}
-    <div class="card summary-card">
-      <div class="summary-head">
-        <span class="section-icon">{% include "dashboard/_icon.html" with name="paper" %}</span>
-        <h3>{{ t.summary_paper }}</h3>
-      </div>
-      {% for key in paper_types %}{% with b=summary.blocks|get:key %}{% if b %}
-      <div class="stack-block">
-        <div class="stack-title small"><strong>{% tr "module_"|add:key %}</strong><span class="muted">{% if b.average_level is not None %}{% tr "avg_fill" n=b.average_level %}{% endif %}</span></div>
-        <div class="stack-bar" role="img" aria-label="{% tr 'module_'|add:key %}">{% for s in b.statuses %}{% if s.count %}<span class="status-{{ s.status }}" style="width: {{ s.pct }}%" title="{% if s.label %}{{ s.label }}{% else %}{% tr 'status_'|add:s.status %}{% endif %} · {{ s.count }}"></span>{% endif %}{% endfor %}</div>
-        {% include "dashboard/_status_legend.html" with b=b type=key inline=True %}
-      </div>
-      {% endif %}{% endwith %}{% endfor %}
-    </div>
-    {% endif %}
+    {% with b=summary.blocks.trash %}{% if b %}{% include "dashboard/_donut_card.html" with key="trash" icon="trash" %}{% endif %}{% endwith %}
 
-    {% with b=summary.blocks.trash %}{% if b %}
-    <div class="card summary-card">
-      <div class="summary-head">
-        <span class="section-icon">{% include "dashboard/_icon.html" with name="trash" %}</span>
-        <h3>{{ t.module_trash }}</h3>
-      </div>
-      <div class="gauge-wrap">
-        <svg class="gauge" viewBox="0 0 100 56" role="img" aria-label="{{ t.avg_fullness }}">
-          <path class="gauge-track" d="M10 50 A40 40 0 0 1 90 50" pathLength="50"/>
-          {% if b.gauge %}<path class="gauge-value{% if b.average_level >= 90 %} status-critical{% elif b.average_level >= 70 %} status-warning{% endif %}" d="M10 50 A40 40 0 0 1 90 50" pathLength="50" stroke-dasharray="{{ b.gauge }} 50"/>{% endif %}
-          <text x="50" y="46" class="gauge-value-text">{% if b.average_level is not None %}{{ b.average_level }}%{% else %}–{% endif %}</text>
-        </svg>
-        <span class="muted small">{{ t.avg_fullness }}</span>
-      </div>
-      {% include "dashboard/_status_legend.html" with b=b type="trash" inline=True %}
-    </div>
-    {% endif %}{% endwith %}
-
-    {% with b=summary.blocks.ammonia %}{% if b %}
-    <div class="card summary-card">
-      <div class="summary-head">
-        <span class="section-icon">{% include "dashboard/_icon.html" with name="air" %}</span>
-        <h3>{{ t.module_ammonia }}</h3>
-      </div>
-      {% if b.worst %}
-      <div class="summary-metric"><strong>{{ b.worst.level|floatformat:"-1" }}<small> ppm</small></strong><span class="muted small truncate" title="{{ b.worst.device.label }}">{{ t.highest_now }} · {{ b.worst.device.label }}{% if b.worst.location %} · {{ b.worst.location }}{% endif %}</span></div>
-      <div class="zone-bar" style="{% if b.zones.0 %}--z1: {{ b.zones.0 }}%;{% endif %}{% if b.zones.1 %} --z2: {{ b.zones.1 }}%;{% endif %}">
-        <i class="zone-marker" style="left: {{ b.marker }}%"></i>
-      </div>
-      {% else %}<p class="muted small">{{ t.no_data }}</p>{% endif %}
-      {% include "dashboard/_status_legend.html" with b=b type="ammonia" inline=True %}
-    </div>
-    {% endif %}{% endwith %}
+    {% with b=summary.blocks.ammonia %}{% if b %}{% include "dashboard/_donut_card.html" with key="ammonia" icon="air" %}{% endif %}{% endwith %}
   </div>
 
-  <div class="summary-lists">
+  {% comment %}With one sensor type selected, an empty list is hidden (and the other one takes the full width).{% endcomment %}
+  {% with show_critical=summary.critical_total|default:sensor_all show_battery=summary.low_battery_total|default:sensor_all %}
+  {% if show_critical or show_battery %}
+  <div class="summary-lists{% if not show_critical or not show_battery %} summary-lists--single{% endif %}">
+    {% if show_critical %}
     <div class="card summary-list">
       <div class="summary-list-head"><h3>{{ t.kpi_critical }}</h3>{% if summary.critical_total > summary.critical|length %}<a class="small" href="?{{ summary_query }}&status=critical#all-sensors">{% tr "see_all_n" n=summary.critical_total %}</a>{% endif %}</div>
       {% for row in summary.critical %}
@@ -126,6 +60,8 @@ that suits its data, then the "needs action" and "low battery" lists. Status lin
       </div>
       {% empty %}<p class="muted small">{{ t.nothing_critical }}</p>{% endfor %}
     </div>
+    {% endif %}
+    {% if show_battery %}
     <div class="card summary-list">
       <div class="summary-list-head"><h3>{{ t.status_battery }} <span class="muted small">&lt; {{ low_battery_limit }}%</span></h3>{% if summary.low_battery_total > summary.low_battery|length %}<a class="small" href="?{{ summary_query }}&status=battery#all-sensors">{% tr "see_all_n" n=summary.low_battery_total %}</a>{% endif %}</div>
       {% for row in summary.low_battery %}
@@ -135,5 +71,8 @@ that suits its data, then the "needs action" and "low battery" lists. Status lin
       </div>
       {% empty %}<p class="muted small">{{ t.no_low_battery }}</p>{% endfor %}
     </div>
+    {% endif %}
   </div>
+  {% endif %}
+  {% endwith %}
 </section>

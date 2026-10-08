@@ -1,8 +1,10 @@
 {% load humanize dashboard_tags %}{# One washroom sensor on the overview: `card` from queries.device_cards. #}
-<div class="card section section--module{% if not card.has_data %} section--waiting{% endif %}">
+{% if card.url %}<a class="card section section--module section--link" href="{{ card.url }}">{% else %}<div class="card section section--module{% if not card.has_data %} section--waiting{% endif %}">{% endif %}
   <div class="section-head">
     <span class="section-icon">{% include "dashboard/_icon.html" with name=card.icon %}</span>
-    {% if not card.has_data %}
+    {% if card.people %}
+    {% if card.people.online %}<span class="badge badge--ok"><i class="dot dot--pulse"></i>{{ t.online }}</span>{% else %}<span class="badge badge--bad"><i class="dot"></i>{{ t.offline }}</span>{% endif %}
+    {% elif not card.has_data %}
     <span class="badge badge--soon">{{ t.waiting_data }}</span>
     {% elif card.type != "satisfaction" and card.latest.condition %}
     <span class="badge badge--{% if card.latest.severity == 'critical' %}bad{% elif card.latest.severity == 'warning' %}warn{% else %}ok{% endif %}">{{ card.latest.condition }}</span>
@@ -16,51 +18,29 @@
     {% if not scope_selected %}<span class="muted small truncate" title="{{ card.location|default:t.unassigned }}">{{ card.location|default:t.unassigned }}</span>{% endif %}
   </div>
 
-  {% if not card.has_data %}
+  {% if card.people %}{% with p=card.people %}
+  <div class="module-readout">
+    <span class="metric">{{ p.visitors|intcomma }}</span>
+    <span class="metric-label">{{ t.visitors_in_range_card }}</span>
+  </div>
+  <span class="module-meta">{% tr "count_of" n=p.current_count|intcomma total=p.maximum_trigger|intcomma %}</span>
+  {% endwith %}
+  {% elif not card.has_data %}
   <span class="metric metric--empty">—</span>
   {% elif card.type == "satisfaction" %}
   <div class="module-readout">
-    <span class="metric">{{ card.average_rating|floatformat:1 }}<small>/ 5</small></span>
-    <span class="metric-label">{% tr "average_ratings" n=card.response_count|intcomma %}</span>
+    <span class="metric">{{ card.ratings.excellent_pct }}%<small> {{ t.level_excellent }}</small></span>
+    <span class="metric-label">{% tr "of_n_ratings" n=card.ratings.total|intcomma %}</span>
   </div>
-  <div class="module-meter">
-    <div class="module-meter-head"><span>{{ t.satisfaction }}</span><span class="badge badge--ok">{{ card.rating_progress }}%</span></div>
-    <div class="progress" role="progressbar" aria-valuenow="{{ card.rating_progress }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ t.avg_satisfaction }}">
-      <span style="width: {{ card.rating_progress }}%"></span>
-    </div>
-  </div>
-  <div class="module-feedback">
-    <strong>{% tr "last_rating" n=card.latest.rating %}</strong>
-    <span>{{ card.latest.comment|default:t.no_comment }}</span>
-  </div>
-  <div class="module-meta"><span></span><span>{% tr "last_at" time=card.latest.time|date:"H:i" %}</span></div>
   {% else %}
   <div class="module-readout">
     <span class="metric">{% if card.latest.level is None %}—{% else %}{{ card.latest.level|floatformat:"-1" }}{% endif %}<small>{% if card.type == "ammonia" %}ppm{% else %}%{% endif %}</small></span>
     <span class="metric-label">{{ card.latest.condition|default:t.condition_unknown }}</span>
   </div>
-  {% if card.level_progress is not None %}
-  <div class="module-meter">
-    <div class="module-meter-head"><span>{{ t.level }}</span><span class="badge badge--soon">{{ card.latest.level|floatformat:"-1" }}%</span></div>
-    <div class="progress" role="progressbar" aria-valuenow="{{ card.level_progress }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ t.level }} {{ card.device.label }}">
-      <span style="width: {{ card.level_progress }}%"></span>
-    </div>
-  </div>
-  {% elif card.type == "ammonia" and card.latest.level is not None %}
-  <div class="module-meter-head"><span>{{ t.concentration }}</span><span class="badge badge--soon">{{ card.latest.level|floatformat:"-1" }} ppm</span></div>
+  {% if card.latest.battery is None %}
+  <span class="battery-line small"><span class="badge badge--soon">🔋 –</span></span>
   {% else %}
-  <span class="module-meta">{{ t.level_not_sent }}</span>
+  <span class="battery-line small"><span class="badge {% if card.latest.battery < 10 %}badge--bad{% elif card.latest.battery < 20 %}badge--warn{% else %}badge--ok{% endif %}">🔋 {{ card.latest.battery }}%</span></span>
   {% endif %}
-  <div class="module-meter">
-    {% if card.latest.battery is not None %}
-    <div class="module-meter-head"><span>{{ t.battery }}</span><span class="badge badge--ok">{{ card.latest.battery }}%</span></div>
-    <div class="progress" role="progressbar" aria-valuenow="{{ card.latest.battery }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ t.battery }} {{ card.device.label }}">
-      <span style="width: {{ card.latest.battery }}%"></span>
-    </div>
-    {% else %}
-    <div class="module-meter-head"><span>{{ t.battery }}</span><span class="muted">{{ t.not_sent }}</span></div>
-    {% endif %}
-  </div>
-  <div class="module-meta"><span></span><span>{% tr "last_at" time=card.latest.time|date:"H:i" %}</span></div>
   {% endif %}
-</div>
+{% if card.url %}</a>{% else %}</div>{% endif %}
