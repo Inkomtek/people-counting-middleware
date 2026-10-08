@@ -419,83 +419,173 @@ class DashboardTests(TestCase):
         self.assertEqual([t["pct"] for t in ticks], ["0", "22", "44", "66", "88"])
         self.assertContains(response, 'style="--p: 22"')  # never "22,0" (invalid CSS)
 
-    def test_notification_timeline_per_day_with_gaps(self):
+    def _notify(self, day, hour, minute, status="200 OK", done_after=None):
+        """A Work Order notification at day hh:mm; done_after = minutes until Algospection finished it."""
+        tz = timezone.get_current_timezone()
+        when = timezone.datetime.combine(day, timezone.datetime.min.time().replace(hour=hour, minute=minute), tz)
+        log = NotificationLog.objects.create(device=self.device, endpoint_url="http://web.internal:8000/dummy/api_iot.php",
+                                             response_status=status)
+        NotificationLog.objects.filter(pk=log.pk).update(
+            time=when, completed_at=when + timedelta(minutes=done_after) if done_after is not None else None)
+        return log
+
+    def test_notification_chart_without_finish_times(self):
         from dashboard import queries
 
         NotificationLog.objects.all().delete()
         today = timezone.localdate()
         yesterday = today - timedelta(days=1)
-        tz = timezone.get_current_timezone()
+        self._notify(yesterday, 9, 15)
+        self._notify(yesterday, 9, 57, "ERROR")
+        self._notify(yesterday, 11, 30)
+        self._notify(today, 9, 0)
+        chart = queries.notification_chart([self.device], yesterday, today)
+        self.assertFalse(chart["completion"])
+        self.assertEqual(chart["series"], ("success", "failed"))  # a failed send adds the pink bar
+        # Busy hours 09-11 widened to 8 hours around them.
+        self.assertEqual([h["hour"] for h in chart["hours"]], list(range(7, 15)))
+        nine = next(h for h in chart["hours"] if h["hour"] == 9)
+        self.assertEqual([(b["key"], b["count"]) for b in nine["bars"]], [("success", 2), ("failed", 1)])
+        self.assertEqual(nine["bars"][0]["pct"], "88")  # the tallest bar
+        self.assertEqual([t["value"] for t in chart["count_ticks"]], [0, 1, 2])  # whole numbers, no repeats
+        self.assertEqual((chart["total"], chart["failed"], chart["busiest_hour"], chart["busiest_count"]), (4, 1, 9, 3))
+        self.assertEqual((chart["count"], chart["average"]), (2, 68))  # 42 + 93 min, nothing across midnight
+        self.assertEqual(chart["line"], "")
 
-        def notify(day, hour, minute, status="200 OK"):
-            log = NotificationLog.objects.create(device=self.device, endpoint_url="x", response_status=status)
-            NotificationLog.objects.filter(pk=log.pk).update(
-                time=timezone.datetime.combine(day, timezone.datetime.min.time().replace(hour=hour, minute=minute), tz))
-
-        notify(yesterday, 9, 15)
-        notify(yesterday, 10, 57, "ERROR")
-        notify(yesterday, 11, 30)
-        notify(today, 6, 0)
-        timeline = queries.notification_timeline([self.device], yesterday, today)
-        self.assertEqual([(row["day"], row["count"]) for row in timeline["days"]], [(today, 1), (yesterday, 3)])
-        dots = timeline["days"][1]["dots"]
-        self.assertEqual([d["gap"] for d in dots], [None, 102, 33])  # no gap across days
-        self.assertEqual(dots[0]["pct"], "38.542")  # 09:15 of 24 h
-        self.assertEqual((dots[1]["gap_label"], dots[2]["gap_label"]), (True, False))  # 33 min is too narrow
-        self.assertFalse(dots[1]["success"])
-        self.assertEqual((timeline["total"], timeline["count"], timeline["average"]), (4, 2, 68))
-        self.assertEqual((timeline["fastest"]["gap"], timeline["slowest"]["gap"]), (33, 102))
         response = self.client.get("/people-counting/", {"start": yesterday.isoformat(), "end": today.isoformat(),
                                                          "scope": self.scope.pk})
-        self.assertNotIn("bubbles", response.context)
-        self.assertContains(response, "Lalu Lintas Notifikasi")
-        self.assertContains(response, "<em>1j 42m</em>")
-        self.assertContains(response, "timeline-dot--failed")
-        self.assertContains(response, "3 notif")
+        self.assertEqual(response.context["nt_chart"]["total"], 4)
+        self.assertContains(response, "bar ntbar--failed")
+        self.assertContains(response, "Jam tersibuk")
+        self.assertNotContains(response, "ntline-area")
 
-    def test_notification_timeline_with_one_notification_has_no_gap(self):
-        NotificationLog.objects.all()[0].delete()  # one left today: no fastest/slowest gap
-        response = self.client.get("/people-counting/", {"scope": self.scope.pk, "range": "today"})
-        self.assertEqual(response.status_code, 200)
-        self.assertIsNone(response.context["timeline"]["fastest"])
-        self.assertContains(response, "1 notif")
-
-    def test_notification_timeline_empty(self):
-        NotificationLog.objects.all().delete()
-        self.assertContains(self.client.get("/people-counting/"), "Belum ada notifikasi pada periode ini.")
-
-    def test_notification_bubbles_above_scope(self):
+    def test_notification_chart_has_no_failed_bar_when_everything_was_sent(self):
         from dashboard import queries
 
         NotificationLog.objects.all().delete()
-        other = self.add_people_device("pc-2", "Toilet Wanita", scope=self.other_scope)
+        day = timezone.localdate()
+        self._notify(day, 9, 0)
+        chart = queries.notification_chart([self.device], day, day)
+        self.assertEqual(chart["series"], ("success",))
+        self.assertEqual(len(chart["hours"][0]["bars"]), 1)
+
+    def test_notification_chart_shows_average_time_to_finish(self):
+        from dashboard import queries
+
+        NotificationLog.objects.all().delete()
+        day = timezone.localdate() - timedelta(days=1)
+        self._notify(day, 9, 0, done_after=20)
+        self._notify(day, 9, 40, done_after=50)
+        self._notify(day, 12, 0, done_after=None)   # still open
+        self._notify(day, 12, 30, "ERROR")          # failed send
+        self._notify(day, 13, 0, done_after=10)
+        chart = queries.notification_chart([self.device], day, day)
+        self.assertTrue(chart["completion"])
+        self.assertEqual(chart["series"], ("success", "failed"))
+        by_hour = {h["hour"]: h for h in chart["hours"]}
+        self.assertEqual([b["count"] for b in by_hour[9]["bars"]], [2, 0])
+        self.assertEqual([b["count"] for b in by_hour[12]["bars"]], [1, 1])
+        self.assertEqual((by_hour[9]["average"], by_hour[9]["finished"]), (35, 2))
+        self.assertEqual(by_hour[13]["average"], 10)
+        self.assertIsNone(by_hour[12]["average"])
+        self.assertEqual(len(chart["line"].split()), 2)  # one point per hour with finished Work Orders
+        self.assertEqual((chart["average_completion"], chart["finished"], chart["open"], chart["failed"]), (27, 3, 1, 1))
+        self.assertEqual((chart["slowest_hour"], chart["slowest_average"]), (9, 35))
+        self.assertEqual((chart["fastest_hour"], chart["fastest_average"]), (13, 10))
+        self.assertEqual([t["value"] for t in chart["minute_ticks"]], [0, 10, 20, 30, 40])
+        self.assertNotIn("target", chart)  # no SLA
+
+        response = self.client.get("/people-counting/", {"start": day.isoformat(), "end": day.isoformat(),
+                                                         "scope": self.scope.pk})
+        self.assertContains(response, "ntline-area")
+        self.assertContains(response, "Rata-rata waktu tuntas")
+        self.assertContains(response, "27m")
+        self.assertContains(response, "1 gagal terkirim")
+        self.assertContains(response, "Waktu Tuntas")
+        self.assertContains(response, "rata-rata 35m · 2 notifikasi")  # slowest hour 09:00
+        self.assertEqual((chart["slowest_count"], chart["fastest_count"]), (2, 1))
+        self.assertNotContains(response, "ntline-target")  # no SLA line
+
+    def test_average_gap_is_combined_from_each_device_average(self):
+        NotificationLog.objects.all().delete()
+        other = self.add_people_device("pc-2", "Toilet Pria 2", scope=self.scope)
         day = timezone.localdate() - timedelta(days=1)
         tz = timezone.get_current_timezone()
-        for device, hour, minute in [(self.device, 9, 0), (self.device, 9, 20), (self.device, 9, 50),
-                                     (other, 9, 10), (other, 14, 0)]:
-            log = NotificationLog.objects.create(device=device, endpoint_url="x", response_status="200 OK")
-            NotificationLog.objects.filter(pk=log.pk).update(
-                time=timezone.datetime.combine(day, timezone.datetime.min.time().replace(hour=hour, minute=minute), tz))
-        bubbles = queries.notification_bubbles([self.device, other], day, day)
-        first, second = bubbles["rows"]
-        nine = first["bubbles"][9]
-        # Gaps only within the same device: 20 and 30 min, not 10 min to the other toilet.
-        self.assertEqual((nine["count"], nine["average"], nine["level"], nine["size"]), (3, 25, "fast", "30"))
-        self.assertEqual((second["bubbles"][9]["level"], second["bubbles"][14]["level"]), ("none", "slow"))
-        self.assertEqual((first["total"], first["average"], first["fastest"]["gap"], first["slowest"]["gap"]),
-                         (3, 25, 20, 30))
-        self.assertEqual(second["location"], "Gedung A · Floor 10 - Toilet Wanita West")
 
+        def notify(device, hour, minute):
+            when = timezone.datetime.combine(day, timezone.datetime.min.time().replace(hour=hour, minute=minute), tz)
+            log = NotificationLog.objects.create(device=device, endpoint_url="x", response_status="200 OK")
+            NotificationLog.objects.filter(pk=log.pk).update(time=when)
+
+        for hour, minute in [(8, 0), (8, 40), (9, 20)]:   # this device: gaps 40 + 40 -> 40m
+            notify(self.device, hour, minute)
+        for hour, minute in [(10, 0), (11, 10)]:          # other device: one gap of 70m
+            notify(other, hour, minute)
+        response = self.client.get("/people-counting/", {"start": day.isoformat(), "end": day.isoformat(),
+                                                         "scope": self.scope.pk})
+        # Each device weighs the same: (40 + 70) / 2, not the 50m average of all three gaps.
+        self.assertEqual(response.context["nt_gap"], {"combined": 55, "devices": 2})
+        # "All devices" is one chart with both devices summed.
+        self.assertEqual(response.context["nt_chart"]["total"], 5)
+        self.assertEqual(response.context["nt_chart"]["device_averages"], {DEVICE_ID: 40, "pc-2": 70})
+        # No device picker: the chart follows the location filter only.
+        self.assertNotContains(response, 'name="nt_device"')
+        self.assertContains(response, "gabungan rata-rata 2 device")
+
+    def test_simulate_wo_completion_only_touches_dummy_notifications(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        NotificationLog.objects.all().delete()
+        day = timezone.localdate() - timedelta(days=1)
+        dummy = [self._notify(day, 8 + i, 0) for i in range(4)]
+        failed = self._notify(day, 13, 0, "ERROR")
+        real = NotificationLog.objects.create(device=self.device, endpoint_url="https://issid-inspection.com/api_iot.php",
+                                              response_status="200 OK")
+        call_command("simulate_wo_completion", "--open", "1", "--seed", "1", stdout=StringIO())
+        done = {log.pk: log.completed_at for log in NotificationLog.objects.all()}
+        self.assertTrue(all(done[log.pk] for log in dummy[:3]))
+        self.assertIsNone(done[dummy[3].pk])  # newest stays open
+        self.assertIsNone(done[failed.pk])
+        self.assertIsNone(done[real.pk])  # never fakes a real Algospection Work Order
+        call_command("simulate_wo_completion", "--reset", stdout=StringIO())
+        self.assertFalse(NotificationLog.objects.exclude(completed_at=None).exists())
+
+    def test_gap_only_uses_notifications_from_01_to_23(self):
+        from dashboard import queries
+
+        NotificationLog.objects.all().delete()
+        day = timezone.localdate() - timedelta(days=1)
+        for hour, minute in [(0, 10), (0, 50), (1, 0), (1, 30), (22, 30), (23, 10), (23, 40)]:
+            self._notify(day, hour, minute)
+        chart = queries.notification_chart([self.device], day, day)
+        # 00:xx and 23:xx are left out: only 01:00 -> 01:30 (30m) and 01:30 -> 22:30 (21h) count.
+        self.assertEqual(chart["count"], 2)
+        self.assertEqual((chart["fastest"]["gap"], chart["slowest"]["gap"]), (30, 1260))
+        self.assertEqual(chart["total"], 7)  # the bars still count every notification
+
+    def test_notification_chart_empty(self):
+        NotificationLog.objects.all().delete()
+        response = self.client.get("/people-counting/", {"scope": self.scope.pk})
+        self.assertContains(response, "Belum ada notifikasi pada periode ini.")
+        self.assertNotContains(response, "ntchart-bars")
+
+    def test_all_devices_above_scope_is_one_combined_chart(self):
+        NotificationLog.objects.all().delete()
+        other = self.add_people_device("pc-2", "Toilet Wanita", scope=self.other_scope)
+        day = timezone.localdate() - timedelta(days=1)
+        self._notify(day, 9, 0)
+        log = NotificationLog.objects.create(device=other, endpoint_url="x", response_status="200 OK")
+        NotificationLog.objects.filter(pk=log.pk).update(time=NotificationLog.objects.exclude(pk=log.pk).get().time)
         params = {"start": day.isoformat(), "end": day.isoformat()}
         response = self.client.get("/people-counting/", params)
-        self.assertIn("bubbles", response.context)
-        self.assertContains(response, "bubble bubble--fast")
-        # Inside one Scope, or with one device picked, it is the timeline again.
-        self.assertNotIn("bubbles", self.client.get("/people-counting/", {**params, "scope": self.scope.pk}).context)
-        picked = self.client.get("/people-counting/", {**params, "nt_device": "pc-2"})
-        self.assertNotIn("bubbles", picked.context)
-        self.assertEqual(picked.context["timeline"]["total"], 2)
-        self.assertContains(picked, '<input type="hidden" name="start"')
+        self.assertNotIn("bubbles", response.context)
+        self.assertEqual(response.context["nt_chart"]["total"], 2)
+        self.assertEqual(next(h for h in response.context["nt_chart"]["hours"] if h["hour"] == 9)["total"], 2)
+        # Narrowing the location filter to one Scope narrows the chart to its devices.
+        scoped = self.client.get("/people-counting/", {**params, "scope": self.other_scope.pk})
+        self.assertEqual(scoped.context["nt_chart"]["total"], 1)
 
     def test_sensor_table_filters_sort_and_status_donut(self):
         busy = self.add_people_device("pc-busy", "Pintu Utama", count=9, events=3, scope=self.other_scope)

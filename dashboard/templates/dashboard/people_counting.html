@@ -165,98 +165,81 @@
   {% endif %}
 </section>
 
-{# ---------- Notification traffic: one 00-24 timeline per day (queries.notification_timeline) ---------- #}
+{# ---------- Notification traffic: one chart, all devices summed or the one picked (queries.notification_chart) ---------- #}
 <section class="card" id="notification-traffic">
   <div class="card-head">
     <div>
-      <h2>{{ t.ntraffic_title }}</h2>
-      <p class="muted small">{% if bubbles %}{{ t.bubble_subtitle }}{% else %}{{ t.ntraffic_subtitle }}{% endif %} · {% include "dashboard/_period.html" %}</p>
+      <h2>{{ t.ntraffic_title }}{% if nt_chart.completion %} · {{ t.nt_title_completion }}{% endif %}</h2>
+      <p class="muted small">{% if nt_chart.completion %}{{ t.nt_completion_subtitle }}{% else %}{{ t.ntraffic_bar_subtitle }}{% endif %}{% if nt_chart.devices|length > 1 %} · {% tr "all_devices" n=nt_chart.devices|length %}{% endif %} · {% include "dashboard/_period.html" %}</p>
     </div>
     <div class="ntraffic-tools">
-      {% if nt_devices %}
-      <form method="get" action="#notification-traffic" class="field field--inline small">
-        {% for key, value in nt_hidden %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
-        <span>{{ t.device }}</span>
-        <select name="nt_device" onchange="this.form.submit()">
-          <option value="">{% tr "all_devices" n=nt_devices|length %}</option>
-          {% for d in nt_devices %}<option value="{{ d.id }}"{% if nt_device and d.id == nt_device.id %} selected{% endif %}>{{ d.label }}</option>{% endfor %}
-        </select>
-      </form>
-      {% endif %}
       <div class="legend small">
-        {% if bubbles %}
-        <span><i class="bubble-key bubble--fast"></i>{{ t.bubble_fast }}</span>
-        <span><i class="bubble-key bubble--mid"></i>{{ t.bubble_mid }}</span>
-        <span><i class="bubble-key bubble--slow"></i>{{ t.bubble_slow }}</span>
-        <span><i class="bubble-key bubble--none"></i>{{ t.bubble_none }}</span>
-        {% else %}
-        <span><i class="legend-dot"></i>{{ t.legend_wo }}</span>
-        <span><i class="legend-dot legend-dot--failed"></i>{{ t.gap_failed }}</span>
-        <span><i class="legend-line legend-line--solid"></i>{{ t.ntraffic_gap }}</span>
+        {% if nt_chart %}
+        <span><i class="legend-bar ntbar--success"></i>{{ t.nt_series_success }}</span>
+        {% if nt_chart.completion %}<span><i class="legend-line ntline-key"></i>{{ t.nt_avg_completion }}</span>{% endif %}
+        {% if nt_chart.failed %}<span><i class="legend-bar ntbar--failed"></i>{{ t.nt_series_failed }}</span>{% endif %}
         {% endif %}
       </div>
     </div>
   </div>
-  {% if bubbles %}
-  {% if bubbles.peak %}
-  <p class="muted small">{{ t.bubble_hint }}</p>
-  <div class="bubbles" role="img" aria-label="{{ t.ntraffic_title }}">
-    <div class="bubble-row bubble-row--axis" aria-hidden="true">
-      <span></span>
-      {% for h in bubbles.hours %}<span class="bubble-hour">{{ h|stringformat:"02d" }}</span>{% endfor %}
+  {% if nt_chart %}{% with nc=nt_chart %}
+  <div class="ntchart-block">
+    {% if nc.total %}
+    <div class="gap-stats">
+      {% if nc.completion %}
+      {# Same three figures as the "waktu tuntas" design (its SLA figure left out). #}
+      <div class="nt-kpi"><span class="nt-kpi-label">{{ t.nt_avg_completion }}</span><strong>{{ nc.average_completion|duration }}</strong><span class="muted small">{% tr "nt_from_finished" n=nc.finished|intcomma %}{% if nc.failed %} · <span class="text-pink">{% tr "nt_n_failed_sent" n=nc.failed|intcomma %}</span>{% endif %}</span></div>
+      <div class="nt-kpi"><span class="nt-kpi-label">{{ t.nt_slowest }}</span><strong class="text-bad">{{ nc.slowest_hour|stringformat:"02d" }}:00</strong><span class="muted small">{% tr "nt_avg_count" gap=nc.slowest_average|duration n=nc.slowest_count %}</span></div>
+      <div class="nt-kpi"><span class="nt-kpi-label">{{ t.nt_fastest }}</span><strong class="text-ok">{{ nc.fastest_hour|stringformat:"02d" }}:00</strong><span class="muted small">{% tr "nt_avg_count" gap=nc.fastest_average|duration n=nc.fastest_count %}</span></div>
+      <div class="nt-kpi"><span class="nt-kpi-label">{{ t.nt_gap_title }}</span><strong>{{ nt_gap.combined|duration }}</strong><span class="muted small">{% if nt_gap.devices > 1 %}{% tr "nt_gap_combined" n=nt_gap.devices %}{% else %}{{ t.nt_gap_single }}{% endif %}</span></div>
+      {% else %}
+      <div><span class="muted small">{{ t.ntraffic_total }}</span><strong>{{ nc.total|intcomma }}</strong>{% if nc.failed %}<span class="small text-bad">{% tr "n_failed" n=nc.failed|intcomma %}</span>{% endif %}</div>
+      <div><span class="muted small">{{ t.heat_busiest }}</span><strong>{{ nc.busiest_hour|stringformat:"02d" }}:00</strong><span class="muted small">{% tr "ntraffic_count" n=nc.busiest_count %}</span></div>
+      <div><span class="muted small">{{ t.nt_gap_title }}</span><strong>{{ nt_gap.combined|duration }}</strong><span class="muted small">{% if nt_gap.devices > 1 %}{% tr "nt_gap_combined" n=nt_gap.devices %}{% else %}{{ t.nt_gap_single }}{% endif %}</span></div>
+      <div><span class="muted small">{{ t.gap_fastest }}</span><strong>{{ nc.fastest.gap|duration }}</strong>{% if nc.fastest %}<span class="muted small">{{ nc.fastest.previous|date:"H:i" }} → {{ nc.fastest.time|date:"H:i" }} · {{ nc.fastest.time|date:"d M" }}</span>{% endif %}</div>
+      <div><span class="muted small">{{ t.gap_slowest }}</span><strong>{{ nc.slowest.gap|duration }}</strong>{% if nc.slowest %}<span class="muted small">{{ nc.slowest.previous|date:"H:i" }} → {{ nc.slowest.time|date:"H:i" }} · {{ nc.slowest.time|date:"d M" }}</span>{% endif %}</div>
+      {% endif %}
     </div>
-    {% for row in bubbles.rows %}
-    <div class="bubble-row">
-      <span class="bubble-device small" title="{{ row.device.label }}{% if row.location %} · {{ row.location }}{% endif %}"><span class="truncate">{{ row.device.label }}</span>{% if row.location %}<span class="truncate muted">{{ row.location }}</span>{% endif %}</span>
-      {% for b in row.bubbles %}<span class="bubble-cell">{% if b %}<i class="bubble bubble--{{ b.level }}" style="--s: {{ b.size }}px" title="{% with h=b.hour|stringformat:'02d' %}{% tr 'bubble_title' device=row.device.label hour=h n=b.count %}{% endwith %}{% if b.average is not None %} · {% tr 'bubble_avg' gap=b.average|duration %}{% endif %}">{% if b.count > 1 %}{{ b.count }}{% endif %}</i>{% endif %}</span>{% endfor %}
-    </div>
-    {% endfor %}
-  </div>
-  <div class="table-wrap">
-    <table class="bubble-table">
-      <thead><tr><th>{{ t.device }}</th><th class="num">{{ t.ntraffic_total }}</th><th class="num">{{ t.gap_average }}</th><th>{{ t.gap_fastest }}</th><th>{{ t.gap_slowest }}</th></tr></thead>
-      <tbody>
-        {% for row in bubbles.rows %}
-        <tr>
-          <td><strong>{{ row.device.label }}</strong>{% if row.device.name %}<br><span class="muted mono">{{ row.device.id }}</span>{% endif %}{% if row.location %}<br><span class="muted">{{ row.location }}</span>{% endif %}</td>
-          <td class="num">{{ row.total|intcomma }}</td>
-          <td class="num">{{ row.average|duration }}</td>
-          <td>{% if row.fastest %}{{ row.fastest.gap|duration }} <span class="muted">· {{ row.fastest.previous|date:"H:i" }} → {{ row.fastest.time|date:"H:i" }}, {{ row.fastest.time|date:"d M" }}</span>{% else %}–{% endif %}</td>
-          <td>{% if row.slowest %}{{ row.slowest.gap|duration }} <span class="muted">· {{ row.slowest.previous|date:"H:i" }} → {{ row.slowest.time|date:"H:i" }}, {{ row.slowest.time|date:"d M" }}</span>{% else %}–{% endif %}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% else %}
-  <div class="empty">{{ t.ntraffic_empty }}</div>
-  {% endif %}
-  {% elif timeline.days %}
-  <div class="gap-stats">
-    <div><span class="muted small">{{ t.ntraffic_total }}</span><strong>{{ timeline.total|intcomma }}</strong></div>
-    <div><span class="muted small">{{ t.gap_average }}</span><strong>{{ timeline.average|duration }}</strong></div>
-    <div><span class="muted small">{{ t.gap_fastest }}</span><strong>{{ timeline.fastest.gap|duration }}</strong>{% if timeline.fastest %}<span class="muted small">{{ timeline.fastest.previous|date:"H:i" }} → {{ timeline.fastest.time|date:"H:i" }} · {{ timeline.fastest.time|date:"d M" }}</span>{% endif %}</div>
-    <div><span class="muted small">{{ t.gap_slowest }}</span><strong>{{ timeline.slowest.gap|duration }}</strong>{% if timeline.slowest %}<span class="muted small">{{ timeline.slowest.previous|date:"H:i" }} → {{ timeline.slowest.time|date:"H:i" }} · {{ timeline.slowest.time|date:"d M" }}</span>{% endif %}</div>
-  </div>
-  <div class="timeline" role="img" aria-label="{{ t.ntraffic_title }}">
-    <div class="timeline-row timeline-row--axis" aria-hidden="true">
-      <span></span>
-      <div class="timeline-track">{% for h in timeline.hours %}<span class="timeline-hour" style="left: {{ h.pct }}%">{{ h.label }}</span>{% endfor %}</div>
-      <span></span>
-    </div>
-    {% for row in timeline.days %}
-    <div class="timeline-row">
-      <span class="timeline-day small">{{ row.day|date:"D, d M" }}</span>
-      <div class="timeline-track">
-        {% for h in timeline.hours %}<i class="timeline-tick" style="left: {{ h.pct }}%"></i>{% endfor %}
-        {% for d in row.dots %}{% if d.gap is not None %}<span class="timeline-gap" style="left: {{ d.gap_from }}%; width: {{ d.gap_width }}%" title="{{ d.previous|date:'H:i' }} → {{ d.time|date:'H:i' }} · {{ d.gap|duration }}">{% if d.gap_label %}<em>{{ d.gap|duration }}</em>{% endif %}</span>{% endif %}{% endfor %}
-        {% for d in row.dots %}<i class="timeline-dot{% if not d.success %} timeline-dot--failed{% endif %}" style="left: {{ d.pct }}%" title="{{ d.time|date:'H:i' }}{% if d.gap is not None %} · {% tr 'ntraffic_since' gap=d.gap|duration time=d.previous|date:'H:i' %}{% else %} · {{ t.ntraffic_first }}{% endif %}{% if not d.success %} · {{ t.gap_failed }}{% endif %}"></i>{% endfor %}
+    <div class="chart ntchart" role="img" aria-label="{{ t.ntraffic_title }} · {{ nc.device.label }}">
+      <div class="chart-scale chart-scale--ticks small muted" aria-hidden="true">
+        {% for tick in nc.count_ticks %}<span style="--p: {{ tick.pct }}">{{ tick.value|intcomma }}</span>{% endfor %}
       </div>
-      <span class="timeline-count small muted">{% tr "ntraffic_count" n=row.count %}</span>
+      <div class="chart-bars chart-bars--ticks chart-bars--flex ntchart-bars" style="--bars: {{ nc.hours|length }}">
+        <div class="chart-grid" aria-hidden="true">{% for tick in nc.count_ticks %}<span style="--p: {{ tick.pct }}"></span>{% endfor %}</div>
+        {% for h in nc.hours %}
+        <div class="bar-col" title="{% with hh=h.hour|stringformat:'02d' %}{% tr 'heat_bar_title' hour=hh n=h.total %}{% endwith %}{% for b in h.bars %}{% if b.count %}&#10;{% tr 'nt_series_'|add:b.key %}: {{ b.count }}{% endif %}{% endfor %}{% if h.average is not None %}&#10;{{ t.nt_avg_completion }}: {{ h.average|duration }} ({% tr 'nt_from_finished' n=h.finished %}){% endif %}">
+          <div class="bar-area bar-pair">
+            {# The pink failed bar appears only in hours with a failed send; otherwise the bar stays centred. #}
+            {% for b in h.bars %}{% if b.key == "success" or b.count %}
+            <span class="bar-stack">
+              {% if b.count %}<span class="bar-value ntvalue--{{ b.key }}">{{ b.count }}</span>{% endif %}
+              <span class="bar ntbar--{{ b.key }}" style="height: {{ b.pct }}%"></span>
+            </span>
+            {% endif %}{% endfor %}
+          </div>
+          <span class="bar-label">{{ h.hour|stringformat:"02d" }}</span>
+        </div>
+        {% endfor %}
+        {% if nc.completion %}
+        {# Average time to finish per hour, on its own scale (right axis). #}
+        <div class="ntline-area" aria-hidden="true">
+          <svg viewBox="0 0 1000 1000" preserveAspectRatio="none"><polyline points="{{ nc.line }}"></polyline></svg>
+          {% for h in nc.hours %}{% if h.average is not None %}<i class="ntline-dot" style="left: {{ h.x }}%; bottom: {{ h.avg_pct }}%"><em>{{ h.average|duration }}</em></i>{% endif %}{% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% if nc.completion %}
+      <div class="chart-scale chart-scale--ticks chart-scale--right small muted" aria-hidden="true">
+        {% for tick in nc.minute_ticks %}<span style="--p: {{ tick.pct }}">{{ tick.value }}m</span>{% endfor %}
+      </div>
+      {% endif %}
     </div>
-    {% endfor %}
+    {% if nc.completion %}<p class="muted small">{{ t.nt_completion_hint }}</p>{% endif %}
+    {% else %}
+    <div class="empty">{{ t.ntraffic_empty }}</div>
+    {% endif %}
   </div>
-  {% else %}
+  {% endwith %}{% else %}
   <div class="empty">{{ t.ntraffic_empty }}</div>
   {% endif %}
 </section>

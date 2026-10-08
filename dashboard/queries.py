@@ -194,95 +194,131 @@ def hourly(devices, start, end):
     }
 
 
-TIMELINE_LABEL_MIN_PCT = 4.5  # gaps narrower than this (% of a day) only show their length on hover
-
-
-def notification_timeline(devices, start, end):
-    """Notification traffic as one 00-24 timeline per WIB day (newest first, only days with
-    notifications): each notification is a dot at its time of day, and consecutive dots on the same day
-    are joined by a segment labelled with the gap. All devices are merged and failed notifications are
-    included. Stats (average, fastest, slowest) cover the gaps within a day; the first notification of a
-    day has no gap, since the count resets daily."""
-    since, until = range_bounds(start, end)
-    logs = NotificationLog.objects.filter(device__in=devices, time__gte=since, time__lt=until).order_by("time")
-    days, gaps = {}, []
-    for log in logs.only("time", "success"):
-        moment = timezone.localtime(log.time)
-        dots = days.setdefault(moment.date(), [])
-        minute = moment.hour * 60 + moment.minute + moment.second / 60
-        dot = {"time": moment, "success": log.success, "pct": f"{minute * 100 / 1440:.3f}", "gap": None}
-        if dots:
-            previous = dots[-1]
-            gap = round((moment - previous["time"]).total_seconds() / 60)
-            width = (moment - previous["time"]).total_seconds() * 100 / 86400
-            dot.update(gap=gap, previous=previous["time"], gap_from=previous["pct"], gap_width=f"{width:.3f}",
-                       gap_label=width >= TIMELINE_LABEL_MIN_PCT)
-            gaps.append(dot)
-        dots.append(dot)
-    rows = [{"day": day, "dots": dots, "count": len(dots)} for day, dots in sorted(days.items(), reverse=True)]
+def _gap_stats(gaps):
+    """Average / fastest / slowest of within-day gaps ({"gap", "previous", "time"} dicts)."""
     return {
-        "days": rows,
-        "total": sum(row["count"] for row in rows),
         "count": len(gaps),
         "average": round(sum(g["gap"] for g in gaps) / len(gaps)) if gaps else None,
         "fastest": min(gaps, key=lambda g: g["gap"], default=None),
         "slowest": max(gaps, key=lambda g: g["gap"], default=None),
-        "hours": [{"label": f"{h:02d}", "pct": f"{h * 100 / 24:g}"} for h in range(0, 25, 3)],
     }
 
 
-BUBBLE_MIN_PX, BUBBLE_MAX_PX = 8, 30
-GAP_FAST, GAP_SLOW = 30, 60  # minutes: < FAST = very frequent, > SLOW = relaxed
+NT_SUCCESS, NT_FAILED = "success", "failed"
+NT_MIN_HOURS = 8  # the chart shows at least this many hours around the busy ones
+# The average time between notifications only uses notifications sent from 01:00 to 23:00 (WIB); the
+# midnight and 23:xx hours are left out (decision 2026-10-08).
+GAP_FIRST_HOUR, GAP_LAST_HOUR = 1, 22
 
 
-def _gap_level(minutes):
-    if minutes is None:
-        return "none"
-    return "fast" if minutes < GAP_FAST else "slow" if minutes > GAP_SLOW else "mid"
+def _round_up(value, step):
+    return max(step, -(-value // step) * step)
 
 
-def notification_bubbles(devices, start, end):
-    """Notification traffic for several devices: per device (row) and hour of day (column) the number
-    of notifications in the range (bubble size, area proportional) and the average gap since that
-    device's previous notification on the same WIB day (bubble colour). Also a summary per device."""
+def notification_chart(devices, start, end):
+    """Notification traffic of one or several devices (summed) as ONE bar chart per hour of day over the range.
+
+    Each hour has a bar of the notifications Algospection accepted, plus a pink bar beside it for failed sends
+    (only when the range has any). When Work Orders have finish times (NotificationLog.completed_at, from
+    Algospection) a line shows the average time to finish per hour on a right-hand minute axis. Hours shown:
+    from the first to the last hour with notifications, widened to at least NT_MIN_HOURS. Also KPIs and the
+    gap stats: per device, the gaps between its notifications on the same day sent between GAP_FIRST_HOUR and
+    GAP_LAST_HOUR o'clock; `average` = the average of each device's own average (every device weighs the same),
+    `device_averages` = those per-device averages."""
     since, until = range_bounds(start, end)
-    logs = (NotificationLog.objects.filter(device__in=devices, time__gte=since, time__lt=until)
-            .order_by("time").only("time", "device_id"))
-    cells, gaps, last = {}, {}, {}
+    logs = list(NotificationLog.objects.filter(device__in=devices, time__gte=since, time__lt=until)
+                .order_by("time").only("time", "success", "completed_at", "device_id"))
+    now = timezone.now()
+    cells = {hour: {NT_SUCCESS: 0, NT_FAILED: 0, "minutes": []} for hour in range(24)}
+    gaps, previous, open_logs, finished = {}, {}, [], []
     for log in logs:
         moment = timezone.localtime(log.time)
-        cell = cells.setdefault((log.device_id, moment.hour), {"count": 0, "gaps": []})
-        cell["count"] += 1
-        previous = last.get(log.device_id)
-        if previous and previous.date() == moment.date():
-            gap = round((moment - previous).total_seconds() / 60)
-            cell["gaps"].append(gap)
-            gaps.setdefault(log.device_id, []).append({"gap": gap, "previous": previous, "time": moment})
-        last[log.device_id] = moment
-    peak = max((c["count"] for c in cells.values()), default=0)
-    rows = []
-    for device in devices:
-        bubbles = []
-        for hour in range(24):
-            cell = cells.get((device.id, hour))
-            if not cell:
-                bubbles.append(None)
-                continue
-            average = round(sum(cell["gaps"]) / len(cell["gaps"])) if cell["gaps"] else None
-            size = BUBBLE_MIN_PX + (BUBBLE_MAX_PX - BUBBLE_MIN_PX) * (cell["count"] / peak) ** 0.5
-            bubbles.append({"hour": hour, "count": cell["count"], "average": average,
-                            "level": _gap_level(average), "size": f"{size:.0f}"})
-        device_gaps = gaps.get(device.id, [])
-        rows.append({
-            "device": device,
-            "location": _location_label(device),
-            "bubbles": bubbles,
-            "total": sum(b["count"] for b in bubbles if b),
-            "average": round(sum(g["gap"] for g in device_gaps) / len(device_gaps)) if device_gaps else None,
-            "fastest": min(device_gaps, key=lambda g: g["gap"], default=None),
-            "slowest": max(device_gaps, key=lambda g: g["gap"], default=None),
+        cell = cells[moment.hour]
+        cell[NT_SUCCESS if log.success else NT_FAILED] += 1
+        if log.success:
+            minutes = log.completion_minutes
+            if minutes is None:
+                open_logs.append(log)
+            else:
+                cell["minutes"].append(minutes)
+                finished.append(minutes)
+        if GAP_FIRST_HOUR <= moment.hour <= GAP_LAST_HOUR:
+            last = previous.get(log.device_id)
+            if last and last.date() == moment.date():
+                gaps.setdefault(log.device_id, []).append(
+                    {"gap": round((moment - last).total_seconds() / 60), "previous": last, "time": moment})
+            previous[log.device_id] = moment
+
+    device_averages = {device_id: round(sum(g["gap"] for g in device_gaps) / len(device_gaps))
+                       for device_id, device_gaps in gaps.items()}
+    all_gaps = [gap for device_gaps in gaps.values() for gap in device_gaps]
+    failed = sum(cells[h][NT_FAILED] for h in range(24))
+    series = (NT_SUCCESS, NT_FAILED) if failed else (NT_SUCCESS,)
+    completion = bool(finished)
+    busy = [hour for hour in range(24) if cells[hour][NT_SUCCESS] + cells[hour][NT_FAILED]]
+    shown = []
+    if busy:
+        first, last = busy[0], busy[-1]
+        if last - first + 1 < NT_MIN_HOURS:  # widen evenly around the busy hours, staying inside 00-23
+            first = max(0, first - (NT_MIN_HOURS - (last - first + 1)) // 2)
+            last = min(23, first + NT_MIN_HOURS - 1)
+            first = max(0, last - NT_MIN_HOURS + 1)
+        shown = list(range(first, last + 1))
+
+    peak = max((cells[h][key] for h in shown for key in series), default=0)
+    # Whole-number axis: one gridline per notification up to 5, else four even steps.
+    count_top = peak if peak <= 5 else _round_up(peak, 4)
+    count_values = list(range(count_top + 1)) if peak <= 5 else [count_top * i // 4 for i in range(5)]
+    averages = {h: round(sum(cells[h]["minutes"]) / len(cells[h]["minutes"])) for h in shown if cells[h]["minutes"]}
+    minute_top = _round_up(max(averages.values(), default=0), 20)  # four steps of whole minutes
+    pct = lambda value, top: f"{value * CHART_TOP / top:g}" if top else "0"  # noqa: E731 (strings: valid CSS)
+    hours = []
+    for index, hour in enumerate(shown):
+        cell = cells[hour]
+        average = averages.get(hour)
+        hours.append({
+            "hour": hour,
+            "total": cell[NT_SUCCESS] + cell[NT_FAILED],
+            "bars": [{"key": key, "count": cell[key], "pct": pct(cell[key], count_top)} for key in series],
+            "average": average,
+            "finished": len(cell["minutes"]),
+            "avg_pct": pct(average, minute_top) if average is not None else None,
+            "x": f"{(index + 0.5) * 100 / len(shown):.3f}",  # centre of the hour's column, % of the chart width
         })
-    return {"rows": rows, "peak": peak, "hours": list(range(24))}
+    line = " ".join(f"{(i + 0.5) * 1000 / len(shown):.1f},{1000 - h['average'] * 10 * CHART_TOP / minute_top:.1f}"
+                    for i, h in enumerate(hours) if h["average"] is not None)
+    totals = [cells[h][NT_SUCCESS] + cells[h][NT_FAILED] for h in range(24)]
+    busiest = max(range(24), key=lambda h: totals[h]) if any(totals) else None
+    oldest_open = min(open_logs, key=lambda log: log.time, default=None)
+    slowest = max(averages, key=averages.get) if averages else None
+    fastest = min(averages, key=averages.get) if averages else None
+    return {
+        "devices": list(devices),
+        "completion": completion,
+        "series": series,
+        "hours": hours,
+        "count_ticks": [{"value": v, "pct": pct(v, count_top)} for v in count_values] if peak else [],
+        "minute_ticks": [{"value": minute_top * i // 4, "pct": f"{CHART_TOP * i / 4:g}"} for i in range(5)],
+        "line": line,
+        # KPIs
+        "total": len(logs),
+        "failed": failed,
+        "busiest_hour": busiest,
+        "busiest_count": totals[busiest] if busiest is not None else 0,
+        "finished": len(finished),
+        "open": len(open_logs),
+        "oldest_open_minutes": round((now - oldest_open.time).total_seconds() / 60) if oldest_open else None,
+        "average_completion": round(sum(finished) / len(finished)) if finished else None,
+        "slowest_hour": slowest,
+        "slowest_average": averages.get(slowest),
+        "slowest_count": totals[slowest] if slowest is not None else 0,
+        "fastest_hour": fastest,
+        "fastest_average": averages.get(fastest),
+        "fastest_count": totals[fastest] if fastest is not None else 0,
+        **_gap_stats(all_gaps),
+        "average": round(sum(device_averages.values()) / len(device_averages)) if device_averages else None,
+        "device_averages": device_averages,
+    }
 
 
 # ---------- recap ----------

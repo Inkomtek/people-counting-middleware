@@ -280,22 +280,18 @@ def overview(request, lang):
     return render(request, "dashboard/overview.html", ctx)
 
 
-def _notification_traffic(request, devices, start, end, scope_selected):
-    """Above Scope level (several toilets): a bubble chart of device x hour plus a summary per device.
-    Inside one Scope, or for one device picked with ?nt_device=: the per-day timeline."""
-    picked = next((d for d in devices if d.id == request.GET.get("nt_device")), None)
-    shown = [picked] if picked else devices
-    ctx = {
-        "nt_devices": devices if len(devices) > 1 else [],
-        "nt_device": picked,
-        # The device picker is a small GET form: it resubmits every other parameter unchanged.
-        "nt_hidden": [(key, value) for key, values in request.GET.lists() if key != "nt_device" for value in values],
+def _notification_traffic(devices, start, end):
+    """One notification chart (queries.notification_chart) of every people device in the location filter, summed
+    (no device picker: the location filter, down to one Scope, chooses the devices). The average gap between
+    notifications is the average of each device's own average (each device weighs the same)."""
+    chart = queries.notification_chart(devices, start, end) if devices else None
+    return {
+        "nt_chart": chart,
+        "nt_gap": {
+            "combined": chart["average"] if chart else None,
+            "devices": len(chart["device_averages"]) if chart else 0,
+        },
     }
-    if not picked and not scope_selected:
-        ctx["bubbles"] = queries.notification_bubbles(shown, start, end)
-    else:
-        ctx["timeline"] = queries.notification_timeline(shown, start, end)
-    return ctx
 
 
 @localized
@@ -310,7 +306,7 @@ def people_counting(request, lang):
         module_name=ctx["t"]["module_people"],
         kpis=queries.kpis(devices, start, end),
         chart=queries.hourly(devices, start, end),
-        **_notification_traffic(request, devices, start, end, ctx["location"]["selected"]["scope"] is not None),
+        **_notification_traffic(devices, start, end),
         # Inside one toilet the sensors drop the location line (the title already names it).
         scope_selected=ctx["location"]["selected"]["scope"] is not None,
     )

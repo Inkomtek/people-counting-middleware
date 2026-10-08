@@ -151,7 +151,7 @@ class SensorLogAdmin(ExportMixin, ReadOnlyAdmin):
 @admin.register(NotificationLog)
 class NotificationLogAdmin(ExportMixin, ReadOnlyAdmin):
     resource_classes = [NotificationLogResource]
-    list_display = ("time", "device", "endpoint_url", "response_status", "success", "wo_number")
+    list_display = ("time", "device", "endpoint_url", "response_status", "success", "wo_number", "completed_at")
     list_filter = ("success", "response_status", "device")
     ordering = ("-time",)
 

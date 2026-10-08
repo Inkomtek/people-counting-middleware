@@ -24,7 +24,7 @@
   --bad: #be123c;
   --bad-soft: #fde8ee;
   --soon: #64748b;
-  --wo: #ea7a12;
+  --wo: #ea7a12; --pink: #db2777;
   --shadow: 0 1px 2px rgba(15, 26, 46, .04), 0 4px 16px rgba(15, 26, 46, .05);
   --radius: 18px;
   color-scheme: light;
@@ -35,7 +35,7 @@
     --ink: #e8edf6; --ink-2: #b6c1d3; --muted: #93a0b5;
     --accent: #7ea3ff; --accent-soft: #1b2a4d;
     --ok: #34d399; --ok-soft: #0f2e25; --warn: #fbbf24; --warn-soft: #33270f;
-    --bad: #fb7185; --bad-soft: #3a1520; --soon: #8a97ab; --wo: #f59e0b;
+    --bad: #fb7185; --bad-soft: #3a1520; --soon: #8a97ab; --wo: #f59e0b; --pink: #f472b6;
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .25);
     color-scheme: dark;
   }
@@ -45,7 +45,7 @@
   --ink: #e8edf6; --ink-2: #b6c1d3; --muted: #93a0b5;
   --accent: #7ea3ff; --accent-soft: #1b2a4d;
   --ok: #34d399; --ok-soft: #0f2e25; --warn: #fbbf24; --warn-soft: #33270f;
-  --bad: #fb7185; --bad-soft: #3a1520; --soon: #8a97ab; --wo: #f59e0b;
+  --bad: #fb7185; --bad-soft: #3a1520; --soon: #8a97ab; --wo: #f59e0b; --pink: #f472b6;
   --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .25);
   color-scheme: dark;
 }
@@ -364,31 +364,45 @@ tbody tr:last-child td { border-bottom: 0; }
 .chart-grid span:first-child { border-top-style: solid; }
 .chart-bars--ticks .bar-col { position: relative; z-index: 1; }
 
-/* Notification traffic: one 00-24 track per day, dots at notification times, gaps as labelled segments. */
+/* Notification traffic (one toilet / device): ONE bar chart per device (queries.notification_chart). Per hour a
+   bar of accepted notifications, a pink bar beside it for failed sends (paired-bar styles .bar-pair /
+   .bar-stack), and with Work Order finish times the average time to finish as a line on a right-hand axis. */
 .gap-stats { display: flex; flex-wrap: wrap; gap: 12px 32px; margin-bottom: 16px; }
 .gap-stats div { display: flex; flex-direction: column; gap: 2px; }
 .gap-stats strong { font-size: 20px; }
-.legend-dot--failed { background: var(--bad); }
-.legend-line { display: inline-block; width: 16px; margin-right: 6px; vertical-align: middle; border-top: 2px dashed var(--ink-2); }
-.legend-line--solid { border-top: 2px solid var(--wo); opacity: .6; }
-.timeline { display: flex; flex-direction: column; gap: 4px; }
-.timeline-row { display: grid; grid-template-columns: 92px 1fr 64px; align-items: center; gap: 12px; height: 34px; }
-.timeline-row--axis { height: 18px; }
-.timeline-day { font-weight: 600; color: var(--ink-2); white-space: nowrap; }
-.timeline-count { text-align: right; white-space: nowrap; }
-.timeline-track { position: relative; height: 100%; }
-.timeline-row:not(.timeline-row--axis) .timeline-track { border-radius: 8px; background: var(--surface-2); }
-.timeline-hour { position: absolute; top: 0; transform: translateX(-50%); font-size: 10.5px; color: var(--muted); }
-.timeline-tick { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--border); }
-.timeline-gap { position: absolute; top: 50%; height: 2px; margin-top: -1px; background: var(--wo); opacity: .55; }
-.timeline-gap em { position: absolute; left: 50%; bottom: 4px; transform: translateX(-50%); font-style: normal; font-size: 10.5px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
-.timeline-dot { position: absolute; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: var(--wo); box-shadow: 0 0 0 2px var(--surface-2); z-index: 1; }
-.timeline-dot--failed { background: var(--bad); }
-.timeline-dot:hover { transform: scale(1.4); }
+.ntraffic-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 16px; }
+.field--inline { flex-direction: row; align-items: center; gap: 8px; }
+.field--inline select { padding: 6px 10px; }
+.ntchart-block + .ntchart-block { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+.ntchart-device { margin: 0 0 12px; font-size: 15px; }
+.ntchart { height: 280px; }
+.ntchart-bars { gap: 10px; }
+.ntchart-bars .bar-pair { gap: 3px; }
+.ntchart-bars .bar-stack { max-width: 38px; }  /* wide bars like the design */
+.ntbar--success { background: color-mix(in srgb, var(--wo) 55%, var(--surface)); }
+.ntvalue--success { color: var(--wo); }
+.ntbar--failed { background: var(--pink); }
+.ntchart .bar[style="height: 0%"] { min-height: 0; }
+.ntvalue--failed { color: var(--pink); }
+.text-pink { color: var(--pink); font-weight: 600; }
+.text-accent { color: var(--accent); }
+/* The "waktu tuntas" KPIs: uppercase label, big figure, caption (design canvas, stage 3). */
+.nt-kpi { gap: 4px !important; }
+.nt-kpi-label { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.nt-kpi strong { font-size: 32px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.gap-stats:has(.nt-kpi) { gap: 12px 56px; margin-bottom: 24px; }
+.chart-scale--right span { right: auto; left: 0; }
+.chart-scale--right { min-width: 36px; text-align: left; }
+.ntline-area { position: absolute; left: 0; right: 0; top: 0; bottom: 22px; z-index: 2; pointer-events: none; }
+.ntline-area svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.ntline-area polyline { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.ntline-dot { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--surface); transform: translate(-50%, 50%); }
+.ntline-dot em { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 0 5px; border-radius: 999px; background: var(--surface); font-style: normal; font-size: 10.5px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+.legend-line { display: inline-block; width: 16px; height: 0; margin-right: 6px; vertical-align: middle; }
+.ntline-key { border-top: 2px solid var(--accent); }
 @media (max-width: 720px) {
-  .timeline-row { grid-template-columns: 56px 1fr; }
-  .timeline-count { display: none; }
-  .timeline-gap em { display: none; }
+  .ntchart-bars { gap: 4px; }
+  .ntline-dot em { display: none; }
 }
 
 /* Overview search (name / ID of devices and locations, results swapped in while typing). */
@@ -403,31 +417,6 @@ tbody tr:last-child td { border-bottom: 0; }
 .search-locations a.chip { display: inline-flex; align-items: center; gap: 4px; text-decoration: none; color: var(--ink); }
 .search-locations a.chip:hover { border-color: var(--accent); }
 .search-locations .icon { width: 13px; height: 13px; }
-
-/* Notification traffic above Scope level: device x hour bubble chart. Size = notifications in that
-   hour (--s, px), colour = average gap since the same device's previous notification. */
-.ntraffic-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 16px; }
-.field--inline { flex-direction: row; align-items: center; gap: 8px; }
-.field--inline select { padding: 6px 10px; }
-.bubbles { display: flex; flex-direction: column; margin: 8px 0 16px; overflow-x: auto; }
-.bubble-row { display: grid; grid-template-columns: 180px repeat(24, minmax(28px, 1fr)); align-items: center; min-height: 40px; border-bottom: 1px dashed var(--border); }
-.bubble-row--axis { min-height: 20px; border-bottom: 1px solid var(--border); }
-.bubble-hour { text-align: center; font-size: 10.5px; color: var(--muted); }
-.bubble-device { display: flex; flex-direction: column; min-width: 0; padding-right: 12px; font-weight: 600; color: var(--ink-2); }
-.bubble-device .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bubble-device .muted { font-weight: 400; font-size: 11px; }
-.bubble-cell { display: grid; place-items: center; height: 100%; }
-.bubble { display: grid; place-items: center; width: var(--s); height: var(--s); border-radius: 50%; font-style: normal; font-size: 10.5px; font-weight: 700; color: #fff; opacity: .9; }
-.bubble:hover { opacity: 1; transform: scale(1.12); }
-.bubble--fast, .bubble-key.bubble--fast { background: var(--bad); }
-.bubble--mid, .bubble-key.bubble--mid { background: var(--wo); }
-.bubble--slow, .bubble-key.bubble--slow { background: var(--ok); }
-.bubble--none, .bubble-key.bubble--none { background: var(--soon); }
-.bubble-key { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
-.bubble-table { width: 100%; }
-@media (max-width: 720px) {
-  .bubble-row { grid-template-columns: 110px repeat(24, 26px); }
-}
 
 /* ---------- overview: Sensor Summary (dashboard/_summary.html) ---------- */
 .sensor-summary { margin-bottom: 28px; }

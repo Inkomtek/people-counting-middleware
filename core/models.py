@@ -229,6 +229,9 @@ class NotificationLog(models.Model):
     # defaults let a scheduler still running older code insert rows during a deploy instead of crashing.
     success = models.BooleanField(default=False, db_default=False, editable=False)
     wo_number = models.CharField(max_length=100, blank=True, default="", db_default="", editable=False)
+    # When the Work Order was finished in Algospection (null = not finished yet). Algospection does not send
+    # this yet; on dev it is filled by `simulate_wo_completion`.
+    completed_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.response_status} - {self.time}"
@@ -236,6 +239,13 @@ class NotificationLog(models.Model):
     def save(self, *args, **kwargs):
         self.success, self.wo_number = work_order_outcome(self.response_status, self.response)
         super().save(*args, **kwargs)
+
+    @property
+    def completion_minutes(self):
+        """Minutes from the notification to the finished Work Order, or None while it is open."""
+        if self.completed_at is None:
+            return None
+        return max(round((self.completed_at - self.time).total_seconds() / 60), 0)
 
 
 class DailyRecap(EventLog):
