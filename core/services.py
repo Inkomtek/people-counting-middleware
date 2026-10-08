@@ -290,7 +290,8 @@ def backfill_events(client, device, start):
 def sync_all():
     client = ZKClient()
     # Only People Counting devices read the ZK people-counting API; other modules need their own integration.
-    for device in DeviceList.objects.filter(type=DeviceList.TYPE_PEOPLE):
+    # DEMO-* devices (seed_locations --demo, local dummies) are not real ZK sensors.
+    for device in DeviceList.objects.filter(type=DeviceList.TYPE_PEOPLE).exclude(id__startswith="DEMO-"):
         try:
             sync_device(device, client)
         except ZKError as exc:
