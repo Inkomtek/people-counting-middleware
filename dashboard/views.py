@@ -146,6 +146,26 @@ def _query_without(request, keys):
     return query.urlencode()
 
 
+def _column_sort(request, columns, prefix="", anchor=""):
+    """Sorting by clicking a column header (?<prefix>sort=<column>&<prefix>dir=asc|desc), so several tables on
+    one page sort independently. Returns (sort, direction, headers); headers[column] = {"href", "active", "dir"}
+    where href sorts by that column ascending, or flips the direction when it is already the active one, and
+    goes back to the first page."""
+    sort = request.GET.get(f"{prefix}sort", "")
+    if sort not in columns:
+        sort = ""
+    direction = "desc" if request.GET.get(f"{prefix}dir") == "desc" else "asc"
+    suffix = f"#{anchor}" if anchor else ""
+    headers = {}
+    for column in columns:
+        query = request.GET.copy()
+        query[f"{prefix}sort"] = column
+        query[f"{prefix}dir"] = "desc" if column == sort and direction == "asc" else "asc"
+        query.pop(f"{prefix}page", None)
+        headers[column] = {"href": f"?{query.urlencode()}{suffix}", "active": column == sort, "dir": direction}
+    return sort, direction, headers
+
+
 def _paginate(request, items, prefix="", default_size=DETAIL_PAGE_SIZE, anchor=""):
     """Paginate `items` with ?<prefix>page= and ?<prefix>size= (one of PAGE_SIZES), so several tables
     on one page page independently. Returns (page, pager) where pager drives _pager.html."""
@@ -288,13 +308,12 @@ DEMO_PREFIXES = ("DEMO-", "DUMMY-")
 
 
 def _people_card_url(device, ctx):
-    """A real people counter's card opens People Counting for its toilet (or the unassigned group),
-    focused on it in the sensor table and the notification chart; demo/dummy devices are not links."""
+    """A real people counter's card opens People Counting for its toilet (or the unassigned group) at the
+    sensor table; demo/dummy devices are not links."""
     if device.id.upper().startswith(DEMO_PREFIXES):
         return None
     where = f"scope={device.scope_id}" if device.scope_id else f"client={locations.UNASSIGNED}"
-    focus = urlencode({"st_q": device.id, "nt_device": device.id})
-    return f"{reverse('dashboard:people_counting')}?{where}&{ctx['range_query']}&{focus}#sensor-table"
+    return f"{reverse('dashboard:people_counting')}?{where}&{ctx['range_query']}#sensor-table"
 
 
 def _active_filters(request, ctx, sensor, status, q):
@@ -356,28 +375,22 @@ def people_counting(request, lang):
         # Inside one toilet the sensors drop the location line (the title already names it).
         scope_selected=ctx["location"]["selected"]["scope"] is not None,
     )
-    wo_page, ctx["wo_pager"] = _paginate(request, queries.work_orders(devices, start, end), "wo_",
+    wo_sort, wo_dir, ctx["wo_headers"] = _column_sort(request, queries.WO_SORTS, "wo_", "notification-log")
+    ev_sort, ev_dir, ctx["ev_headers"] = _column_sort(request, queries.EVENT_SORTS, "ev_", "event-log")
+    wo_page, ctx["wo_pager"] = _paginate(request, queries.work_orders(devices, start, end, sort=wo_sort,
+                                                                      direction=wo_dir), "wo_",
                                          PREVIEW_PAGE_SIZE, "notification-log")
-    ev_page, ctx["event_pager"] = _paginate(request, queries.events(devices, start, end), "ev_",
+    ev_page, ctx["event_pager"] = _paginate(request, queries.events(devices, start, end, sort=ev_sort,
+                                                                    direction=ev_dir), "ev_",
                                             PREVIEW_PAGE_SIZE, "event-log")
-    # Sensor table with its own filters (st_q name/ID, st_status, st_sort) and pagination (st_page/st_size).
-    st_status = request.GET.get("st_status", "")
-    if st_status not in ("online", "offline", "near"):
-        st_status = ""
-    st_sort = request.GET.get("st_sort", "attention")
-    if st_sort not in queries.SENSOR_SORTS:
-        st_sort = "attention"
-    st_q = request.GET.get("st_q", "").strip()[:100]
-    rows = queries.sensor_table(devices, start, end, st_status, st_q, st_sort)
+    # Sensor table: no filters, sorted by clicking a column header (st_sort + st_dir), paginated (st_page/st_size).
+    st_sort, st_dir, ctx["st_headers"] = _column_sort(request, queries.SENSOR_SORTS, "st_", "sensor-table")
+    rows = queries.sensor_table(devices, start, end, st_sort, st_dir)
     st_page, ctx["sensor_pager"] = _paginate(request, rows, "st_", PREVIEW_PAGE_SIZE, "sensor-table")
     online = ctx["online_count"]
     ctx.update(
-        sensor_rows=list(st_page), st_status=st_status, st_sort=st_sort, st_q=st_q,
-        st_sorts=queries.SENSOR_SORTS,
+        sensor_rows=list(st_page),
         near_pct=queries.NEAR_THRESHOLD,
-        st_hidden=[(key, value) for key, values in request.GET.lists()
-                   if key not in ("st_status", "st_sort", "st_q", "st_page") for value in values],
-        st_base=_query_without(request, ("st_status", "st_page")),
         online_donut=queries.online_donut(online, len(ctx["sensors"])),
         offline_count=len(ctx["sensors"]) - online,
     )
@@ -409,13 +422,16 @@ def people_counting_detail(request, lang):
         if status not in (queries.STATUS_SUCCESS, queries.STATUS_FAILED):
             status = ""
         query = params.get("q", "").strip()
-        page, ctx["pager"] = _paginate(request, queries.work_orders(devices, start, end, status, query), anchor="table")
+        sort, direction, ctx["wo_headers"] = _column_sort(request, queries.WO_SORTS, anchor="table")
+        page, ctx["pager"] = _paginate(request, queries.work_orders(devices, start, end, status, query, sort, direction),
+                                       anchor="table")
         ctx.update(wo_rows=[queries.work_order_row(log) for log in page], wo_status=status, wo_query=query)
     else:
         time_from, time_to = parse_time(params.get("time_from") or ""), parse_time(params.get("time_to") or "")
         event_type = params.get("event_type", "")
+        sort, direction, ctx["ev_headers"] = _column_sort(request, queries.EVENT_SORTS, anchor="table")
         page, ctx["pager"] = _paginate(
-            request, queries.events(devices, start, end, time_from, time_to, event_type), anchor="table",
+            request, queries.events(devices, start, end, time_from, time_to, event_type, sort, direction), anchor="table",
         )
         ctx.update(event_rows=list(page), event_types=queries.EVENT_LOG_TYPES,
                    event_type=event_type, time_from=params.get("time_from", ""), time_to=params.get("time_to", ""))
@@ -450,15 +466,17 @@ def export(request, lang, kind, fmt):
     elif kind == "wo":
         status = params.get("status", "")
         data = tablib.Dataset(headers=[t["time"], t["wo_number"], t["device_id"], t["destination"], t["status"]])
-        for log in queries.work_orders(devices, start, end, status, params.get("q", "").strip()):
+        sort, direction, _ = _column_sort(request, queries.WO_SORTS)
+        for log in queries.work_orders(devices, start, end, status, params.get("q", "").strip(), sort, direction):
             row = queries.work_order_row(log)
             data.append([_local(log.time), row["wo_number"], log.device_id, row["destination"], log.response_status])
         prefix = t["export_wo"]
     else:
         data = tablib.Dataset(headers=[t["time"], t["device_id"], t["event_id"], t["event_type"],
                                        t["recognition_target"], t["counted"]])
+        sort, direction, _ = _column_sort(request, queries.EVENT_SORTS)
         logs = queries.events(devices, start, end, parse_time(params.get("time_from") or ""),
-                              parse_time(params.get("time_to") or ""), params.get("event_type", ""))
+                              parse_time(params.get("time_to") or ""), params.get("event_type", ""), sort, direction)
         for log in logs:
             data.append([_local(log.time), log.device_id, log.id, log.event_type,
                          log.recognition_target, t["yes"] if log.counted else t["no"]])

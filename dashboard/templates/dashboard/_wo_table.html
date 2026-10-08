@@ -1,6 +1,12 @@
 {% load dashboard_tags %}<div class="table-wrap">
   <table>
-    <thead><tr><th>{{ t.time }}</th><th>{{ t.wo_number }}</th><th>{{ t.device_id }}</th><th>{{ t.destination }}</th><th>{{ t.status }}</th></tr></thead>
+    <thead><tr>
+      {% include "dashboard/_sort_header.html" with h=wo_headers.time label=t.time %}
+      {% include "dashboard/_sort_header.html" with h=wo_headers.number label=t.wo_number %}
+      {% include "dashboard/_sort_header.html" with h=wo_headers.device label=t.device_id %}
+      {% include "dashboard/_sort_header.html" with h=wo_headers.destination label=t.destination %}
+      {% include "dashboard/_sort_header.html" with h=wo_headers.status label=t.status %}
+    </tr></thead>
     <tbody>
       {% for row in wo_rows %}
       <tr>

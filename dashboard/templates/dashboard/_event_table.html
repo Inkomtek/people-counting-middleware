@@ -1,6 +1,13 @@
 {% load dashboard_tags %}<div class="table-wrap">
   <table>
-    <thead><tr><th>{{ t.time }}</th><th>{{ t.device_id }}</th><th>{{ t.event_id }}</th><th>{{ t.event_type }}</th><th>{{ t.recognition_target }}</th><th>{{ t.counted }}</th></tr></thead>
+    <thead><tr>
+      {% include "dashboard/_sort_header.html" with h=ev_headers.time label=t.time %}
+      {% include "dashboard/_sort_header.html" with h=ev_headers.device label=t.device_id %}
+      {% include "dashboard/_sort_header.html" with h=ev_headers.event label=t.event_id %}
+      {% include "dashboard/_sort_header.html" with h=ev_headers.type label=t.event_type %}
+      {% include "dashboard/_sort_header.html" with h=ev_headers.target label=t.recognition_target %}
+      {% include "dashboard/_sort_header.html" with h=ev_headers.counted label=t.counted %}
+    </tr></thead>
     <tbody>
       {% for e in event_rows %}
       <tr>

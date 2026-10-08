@@ -41,8 +41,8 @@
         <text x="21" y="27" class="donut-caption">{{ t.devices_short }}</text>
       </svg>
       <ul class="status-legend small">
-        <li><a href="?{{ st_base }}&st_status=online#sensor-table"><i class="status-dot status-normal"></i><span>{{ t.online }}</span><strong>{{ online_count|intcomma }}</strong></a></li>
-        <li><a href="?{{ st_base }}&st_status=offline#sensor-table"><i class="status-dot status-critical"></i><span>{{ t.offline }}</span><strong>{{ offline_count|intcomma }}</strong></a></li>
+        <li><a href="{% querystring st_sort='status' st_dir='desc' st_page=None %}#sensor-table"><i class="status-dot status-normal"></i><span>{{ t.online }}</span><strong>{{ online_count|intcomma }}</strong></a></li>
+        <li><a href="{% querystring st_sort='status' st_dir='asc' st_page=None %}#sensor-table"><i class="status-dot status-critical"></i><span>{{ t.offline }}</span><strong>{{ offline_count|intcomma }}</strong></a></li>
       </ul>
     </div>
     {% else %}
@@ -178,40 +178,18 @@
       <p class="muted small">{{ t.threshold_per_sensor }} · {% tr "sensor_table_hint" n=near_pct %}</p>
     </div>
   </div>
-  <form class="table-filters" method="get" action="#sensor-table" data-search data-search-reset="st_page">
-    {% for key, value in st_hidden %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
-    <label class="search-box">
-      {% include "dashboard/_icon.html" with name="search" %}
-      <input type="search" name="st_q" value="{{ st_q }}" placeholder="{{ t.search_sensor }}" aria-label="{{ t.search_sensor }}" autocomplete="off" maxlength="100">
-      <button type="button" class="search-clear" data-search-clear aria-label="{{ t.search_clear }}"{% if not st_q %} hidden{% endif %}>{% include "dashboard/_icon.html" with name="x" %}</button>
-    </label>
-    <button type="submit" class="btn btn--primary">{{ t.search_button }}</button>
-    <label class="field field--inline small"><span>{{ t.status }}</span>
-      <select name="st_status" onchange="this.form.submit()">
-        <option value="">{{ t.all }}</option>
-        <option value="online"{% if st_status == "online" %} selected{% endif %}>{{ t.online }}</option>
-        <option value="offline"{% if st_status == "offline" %} selected{% endif %}>{{ t.offline }}</option>
-        <option value="near"{% if st_status == "near" %} selected{% endif %}>{{ t.near_threshold }}</option>
-      </select>
-    </label>
-    <label class="field field--inline small"><span>{{ t.sort_by }}</span>
-      <select name="st_sort" onchange="this.form.submit()">
-        {% for key in st_sorts %}<option value="{{ key }}"{% if key == st_sort %} selected{% endif %}>{% tr "sort_"|add:key %}</option>{% endfor %}
-      </select>
-    </label>
-  </form>
-  <div data-search-results>
   {% if sensor_rows %}
   <div class="table-wrap">
     <table class="sensor-table">
       <thead>
         <tr>
-          <th>{{ t.sensor }}</th>
-          {% if not scope_selected %}<th>{{ t.location }}</th>{% endif %}
-          <th>{{ t.current_count }}</th>
-          <th class="num">{{ t.legend_visitors }}</th>
+          {# Sortable headers: a click sorts by the column, a second click flips the direction. #}
+          {% include "dashboard/_sort_header.html" with h=st_headers.sensor label=t.sensor %}
+          {% if not scope_selected %}{% include "dashboard/_sort_header.html" with h=st_headers.location label=t.location %}{% endif %}
+          {% include "dashboard/_sort_header.html" with h=st_headers.count label=t.current_count %}
+          {% include "dashboard/_sort_header.html" with h=st_headers.visitors label=t.legend_visitors num=True %}
           <th class="num">{{ t.notifications_sent }}</th>
-          <th>{{ t.status }}</th>
+          {% include "dashboard/_sort_header.html" with h=st_headers.status label=t.status %}
         </tr>
       </thead>
       <tbody>
@@ -230,7 +208,6 @@
           <td class="num">{{ s.notifications|intcomma }}{% if s.failed %} <span class="text-bad small">({% tr "n_failed" n=s.failed|intcomma %})</span>{% endif %}</td>
           <td class="nowrap">
             {% if s.online %}<span class="badge badge--ok"><i class="dot dot--pulse"></i>{{ t.online }}</span>{% else %}<span class="badge badge--bad"><i class="dot"></i>{{ t.offline }}</span>{% endif %}
-            <br><span class="muted small">{% if s.last_sync %}{% tr "sync_at" time=s.last_sync|date:"H:i" %}{% else %}–{% endif %}</span>
           </td>
         </tr>
         {% endfor %}
@@ -241,7 +218,6 @@
   {% else %}
   <div class="empty">{{ t.no_sensor_match }}</div>
   {% endif %}
-  </div>
 </section>
 {% endif %}
 

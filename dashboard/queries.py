@@ -70,15 +70,14 @@ def sensor_statuses(devices):
 
 
 NEAR_THRESHOLD = 80  # % of maximum_trigger: "hampir batas"
-SENSOR_SORTS = ("attention", "name", "count", "visitors", "notifications")
+SENSOR_SORTS = ("sensor", "location", "count", "visitors", "status")  # sortable sensor-table columns
 DONUT_R = 15.915  # circumference 100
 
 
-def sensor_table(devices, start, end, status="", query="", sort="attention"):
-    """People counting sensors as table rows: sensor_statuses plus location, visitors in and
-    notifications sent / failed in the range. Filtered by `status` (online / offline / near = at least
-    NEAR_THRESHOLD % of the trigger) and `query` (name or ID), sorted by `sort` (SENSOR_SORTS;
-    "attention" = offline first, then closest to the trigger)."""
+def sensor_table(devices, start, end, sort="", direction="asc"):
+    """People counting sensors as table rows: sensor_statuses plus location, visitors in and notifications
+    sent / failed in the range. Sorted by a column (SENSOR_SORTS) in `direction` ("asc" / "desc"); without
+    one, "needs attention" order: offline first, then closest to the trigger."""
     since, until = range_bounds(start, end)
     visitors = dict(EventLog.objects.filter(device__in=devices, time__gte=since, time__lt=until)
                     .filter(COUNTED_EVENTS).values("device").annotate(n=Count("id")).values_list("device", "n"))
@@ -93,23 +92,16 @@ def sensor_table(devices, start, end, status="", query="", sort="attention"):
                    notifications=notified["n"], failed=notified["n"] - notified["ok"],
                    near=row["progress"] >= NEAR_THRESHOLD)
         rows.append(row)
-    if status == "online":
-        rows = [r for r in rows if r["online"]]
-    elif status == "offline":
-        rows = [r for r in rows if not r["online"]]
-    elif status == "near":
-        rows = [r for r in rows if r["near"]]
-    if query:
-        needle = query.lower()
-        rows = [r for r in rows if needle in r["device"].id.lower() or needle in (r["device"].name or "").lower()]
     keys = {
-        "attention": lambda r: (r["online"], -r["progress"], r["device"].label),
-        "name": lambda r: r["device"].label.lower(),
-        "count": lambda r: (-r["current_count"], r["device"].label),
-        "visitors": lambda r: (-r["visitors"], r["device"].label),
-        "notifications": lambda r: (-r["notifications"], r["device"].label),
+        "sensor": lambda r: r["device"].label.lower(),
+        "location": lambda r: ((r["location"] or "").lower(), r["device"].label.lower()),
+        "count": lambda r: (r["progress"], r["current_count"], r["device"].label.lower()),
+        "visitors": lambda r: (r["visitors"], r["device"].label.lower()),
+        "status": lambda r: (r["online"], r["device"].label.lower()),  # ascending = offline first
     }
-    return sorted(rows, key=keys.get(sort, keys["attention"]))
+    if sort not in keys:
+        return sorted(rows, key=lambda r: (r["online"], -r["progress"], r["device"].label))
+    return sorted(rows, key=keys[sort], reverse=direction == "desc")
 
 
 def online_donut(online, total):
@@ -386,10 +378,26 @@ def _as_date(value):
 
 # ---------- Work Orders ----------
 
-def work_orders(devices, start, end, status="", query=""):
+# Sortable columns of the Notification Log and Event Log tables: column key -> model fields (ascending).
+WO_SORTS = {"time": ("time",), "number": ("wo_number",), "device": ("device_id",),
+            "destination": ("endpoint_url",), "status": ("success", "response_status")}
+EVENT_SORTS = {"time": ("time", "id"), "device": ("device_id",), "event": ("id",), "type": ("event_type",),
+               "target": ("recognition_target",), "counted": ("counted",)}
+
+
+def _sorted(queryset, columns, sort, direction, default):
+    """Order by a sortable column (`columns[sort]`, "asc"/"desc"), newest first among equal values; without
+    a known column, the `default` ordering."""
+    if sort not in columns:
+        return queryset.order_by(*default)
+    sign = "-" if direction == "desc" else ""
+    return queryset.order_by(*(sign + field for field in columns[sort]), *default)
+
+
+def work_orders(devices, start, end, status="", query="", sort="", direction="asc"):
     since, until = range_bounds(start, end)
-    logs = (NotificationLog.objects.filter(device__in=devices, time__gte=since, time__lt=until)
-            .select_related("device").order_by("-time"))
+    logs = _sorted(NotificationLog.objects.filter(device__in=devices, time__gte=since, time__lt=until)
+                   .select_related("device"), WO_SORTS, sort, direction, ("-time",))
     if status == STATUS_SUCCESS:
         logs = logs.filter(SUCCESS)
     elif status == STATUS_FAILED:
@@ -405,12 +413,13 @@ def work_order_row(log):
 
 # ---------- events ----------
 
-def events(devices, start, end, time_from=None, time_to=None, event_type=""):
-    """Event log in the range, newest first; time_from/time_to filter the time of day."""
+def events(devices, start, end, time_from=None, time_to=None, event_type="", sort="", direction="asc"):
+    """Event log in the range, newest first unless sorted by a column (EVENT_SORTS); time_from/time_to filter
+    the time of day."""
     since, until = range_bounds(start, end)
-    logs = (EventLog.objects.filter(device__in=devices, time__gte=since, time__lt=until,
-                                    event_type__in=EVENT_LOG_TYPES)
-            .select_related("device").order_by("-time", "-id"))
+    logs = _sorted(EventLog.objects.filter(device__in=devices, time__gte=since, time__lt=until,
+                                           event_type__in=EVENT_LOG_TYPES)
+                   .select_related("device"), EVENT_SORTS, sort, direction, ("-time", "-id"))
     if time_from or time_to:
         tz = timezone.get_current_timezone()
         logs = logs.annotate(local_time=TruncTime("time", tzinfo=tz))

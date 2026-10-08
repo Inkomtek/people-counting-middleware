@@ -407,7 +407,7 @@ class DashboardTests(TestCase):
                          ["pc-off"])
         cards = {c["device"].id: c for c in response.context["device_cards"]}
         self.assertEqual(cards[DEVICE_ID]["url"],
-                         f"/people-counting/?scope={self.scope.pk}&range=today&st_q={DEVICE_ID}&nt_device={DEVICE_ID}#sensor-table")
+                         f"/people-counting/?scope={self.scope.pk}&range=today#sensor-table")
         demo = self.add_people_device("DEMO-PEOPLE-01", "Demo")
         demo_card = next(c for c in self.client.get("/").context["device_cards"] if c["device"].id == demo.id)
         self.assertIsNone(demo_card["url"])  # demo/dummy counters are not links
@@ -603,7 +603,7 @@ class DashboardTests(TestCase):
         scoped = self.client.get("/people-counting/", {**params, "scope": self.other_scope.pk})
         self.assertEqual(scoped.context["nt_chart"]["total"], 1)
 
-    def test_sensor_table_filters_sort_and_status_donut(self):
+    def test_sensor_table_sorts_by_column_and_status_donut(self):
         busy = self.add_people_device("pc-busy", "Pintu Utama", count=9, events=3, scope=self.other_scope)
         quiet = self.add_people_device("pc-quiet", "Wastafel", count=1)
         SensorLog.objects.create(device=quiet, status=SensorLog.STATUS_OFFLINE, endpoint_url="x", response={})
@@ -618,18 +618,67 @@ class DashboardTests(TestCase):
         self.assertEqual(busy_row["location"], "Gedung A · Floor 10 - Toilet Wanita West")
         self.assertEqual((response.context["online_count"], response.context["offline_count"]), (2, 1))
         self.assertEqual([seg["kind"] for seg in response.context["online_donut"]], ["online", "offline"])
-        self.assertContains(response, "<th>Lokasi</th>")
+        # No search, status filter or sort dropdown; no "synced HH:MM" under the status.
+        for gone in ('name="st_q"', 'name="st_status"', '<select name="st_sort"', "Sinkron"):
+            self.assertNotContains(response, gone)
 
         def ids(**params):
             return [r["device"].id for r in self.client.get("/people-counting/", params).context["sensor_rows"]]
 
-        self.assertEqual(ids(st_status="offline"), ["pc-quiet"])
-        self.assertEqual(ids(st_status="near"), ["pc-busy"])
-        self.assertEqual(ids(st_q="WASTA"), ["pc-quiet"])
-        self.assertEqual(ids(st_sort="visitors"), ["pc-busy", DEVICE_ID, "pc-quiet"])
-        self.assertEqual(ids(st_sort="name"), [DEVICE_ID, "pc-busy", "pc-quiet"])  # unnamed: label = ID
+        self.assertEqual(ids(st_sort="sensor"), [DEVICE_ID, "pc-busy", "pc-quiet"])  # unnamed: label = ID
+        self.assertEqual(ids(st_sort="sensor", st_dir="desc"), ["pc-quiet", "pc-busy", DEVICE_ID])
+        self.assertEqual(ids(st_sort="location"), [DEVICE_ID, "pc-quiet", "pc-busy"])  # same toilet: by name
+        self.assertEqual(ids(st_sort="count"), ["pc-quiet", DEVICE_ID, "pc-busy"])  # 10 %, 40 %, 90 % of threshold
+        self.assertEqual(ids(st_sort="visitors", st_dir="desc"), ["pc-busy", DEVICE_ID, "pc-quiet"])
+        self.assertEqual(ids(st_sort="status"), ["pc-quiet", DEVICE_ID, "pc-busy"])  # offline first
+        self.assertEqual(ids(st_sort="notifications"), ids())  # not a sortable column: default order
+        # The active header links to the opposite direction; the others start ascending.
+        sorted_page = self.client.get("/people-counting/", {"st_sort": "visitors"})
+        self.assertIn("st_dir=desc", sorted_page.context["st_headers"]["visitors"]["href"])
+        self.assertIn("st_dir=asc", sorted_page.context["st_headers"]["sensor"]["href"])
+        self.assertContains(sorted_page, 'aria-sort="ascending"')
         scoped = self.client.get("/people-counting/", {"scope": self.scope.pk})
-        self.assertNotContains(scoped, "<th>Lokasi</th>")
+        self.assertNotContains(scoped, "st_sort=location")
+
+    def test_notification_and_event_logs_sort_by_column_on_both_pages(self):
+        NotificationLog.objects.all().delete()
+        EventLog.objects.all().delete()
+        day = timezone.localdate()
+        late = self._notify(day, 11, 0)
+        early = self._notify(day, 9, 0, "ERROR")
+        NotificationLog.objects.filter(pk=late.pk).update(wo_number="000200")
+        NotificationLog.objects.filter(pk=early.pk).update(wo_number="000100")
+        tz = timezone.get_current_timezone()
+        for event_id, hour, event_type in [("ev-b", 8, "out"), ("ev-a", 10, "in")]:
+            EventLog.objects.create(id=event_id, device=self.device, event_type=event_type, recognition_target="Cross Line",
+                                    time=timezone.datetime.combine(day, timezone.datetime.min.time().replace(hour=hour), tz))
+
+        def wo(url, **params):
+            return [r["wo_number"] for r in self.client.get(url, {"range": "today", **params}).context["wo_rows"]]
+
+        def ev(url, **params):
+            return [e.id for e in self.client.get(url, {"range": "today", **params}).context["event_rows"]]
+
+        page, detail = "/people-counting/", "/people-counting/detail/"
+        # Default: newest first. People Counting uses wo_/ev_ prefixes, the detail tabs plain sort/dir.
+        self.assertEqual(wo(page), ["000200", "000100"])
+        self.assertEqual(wo(page, wo_sort="time"), ["000100", "000200"])
+        self.assertEqual(wo(page, wo_sort="number", wo_dir="desc"), ["000200", "000100"])
+        self.assertEqual(wo(page, wo_sort="status"), ["000100", "000200"])  # failed first
+        self.assertEqual(ev(page, ev_sort="event"), ["ev-a", "ev-b"])
+        self.assertEqual(ev(page, ev_sort="type", ev_dir="desc"), ["ev-b", "ev-a"])  # out before in
+        self.assertEqual(wo(detail, tab="wo", sort="number"), ["000100", "000200"])
+        self.assertEqual(ev(detail, tab="events", sort="time"), ["ev-b", "ev-a"])
+        # Sorting one table leaves the other alone and returns to its first page.
+        response = self.client.get(page, {"range": "today", "wo_sort": "time", "wo_page": "2"})
+        headers = response.context["wo_headers"]
+        self.assertIn("wo_dir=desc", headers["time"]["href"])
+        self.assertNotIn("wo_page", headers["time"]["href"])
+        self.assertTrue(headers["time"]["href"].endswith("#notification-log"))
+        self.assertFalse(any(h["active"] for h in response.context["ev_headers"].values()))
+        # The export follows the on-screen sort.
+        csv = self.client.get("/people-counting/detail/wo.csv", {"range": "today", "sort": "number"}).content.decode()
+        self.assertLess(csv.index("000100"), csv.index("000200"))
 
     def test_overview_search_by_device_name_and_id(self):
         DeviceList.objects.create(id="soap-a", type="soap", name="Sabun Wastafel", scope=self.scope)
@@ -660,7 +709,8 @@ class DashboardTests(TestCase):
         self.assertContains(response, '<button type="submit" class="btn btn--primary">Cari</button>')
         self.assertContains(response, '<input type="hidden" name="range" value="7">')
         self.assertNotContains(response, '<input type="hidden" name="dev_page"')
-        self.assertContains(self.client.get("/people-counting/"), '<button type="submit" class="btn btn--primary">Cari</button>')
+        # People Counting's sensor table has no search box any more.
+        self.assertNotContains(self.client.get("/people-counting/"), '<button type="submit" class="btn btn--primary">Cari</button>')
 
     def test_overview_search_lists_matching_locations(self):
         response = self.client.get("/", {"q": "toilet wanita"})
