@@ -24,6 +24,13 @@ def run_sync():
         logger.exception("Sync cycle crashed")
 
 
+def run_automation():
+    close_old_connections()
+    from automation import engine
+
+    engine.tick()
+
+
 class Command(BaseCommand):
     help = "Run the APScheduler loop that syncs all devices on the interval set in Admin."
 
@@ -46,6 +53,8 @@ class Command(BaseCommand):
                 logger.info("Sync interval changed to %s second(s)", interval)
 
         scheduler.add_job(check_config, "interval", seconds=CONFIG_CHECK_SECONDS, id="check_config")
+        # Automation: offline checks, escalations to supervisors and retries of failed sends.
+        scheduler.add_job(run_automation, "interval", seconds=60, id="automation_tick", max_instances=1, coalesce=True)
 
         self.stdout.write(f"Scheduler started: sync every {state['interval']} second(s). Ctrl+C to stop.")
         run_sync()

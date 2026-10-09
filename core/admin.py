@@ -1,5 +1,5 @@
 import tablib
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.db.models import Count, Q
 from django.db.models.functions import TruncDate
 from django.http import HttpResponse
@@ -82,9 +82,16 @@ class FixedIdAdmin(admin.ModelAdmin):
 
 @admin.register(Endpoint)
 class EndpointAdmin(FixedIdAdmin):
+    # Notification endpoints are no longer used by the sync (2026-10-09): Work Orders and every other
+    # notification are configured in Admin > Automation. The rows stay for history.
     list_display = ("id", "type", "url", "is_active")
     list_editable = ("is_active",)
     list_filter = ("type", "is_active")
+
+    def changelist_view(self, request, extra_context=None):
+        messages.info(request, "Notifikasi (Work Order, WhatsApp, Telegram, Email) sekarang diatur di "
+                               "Admin › Automation. Endpoint bertipe notification tidak dipakai lagi.")
+        return super().changelist_view(request, extra_context)
 
 
 @admin.register(Client, Region)

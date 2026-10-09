@@ -1,0 +1,52 @@
+# WhatsApp gateway for Automation: Evolution API (open source, self-hosted, free), as its own stack,
+# separate from the main app (web / scheduler / db). Start / stop it on its own:
+#   docker compose -f docker-compose.evolution.yml --env-file .env up -d
+#   docker compose -f docker-compose.evolution.yml --env-file .env down
+# Manager (create the instance, scan the QR with the sending number): http://localhost:8080/manager
+# Only published on 127.0.0.1: on a server open it through an ssh tunnel (ssh -L 8080:127.0.0.1:8080 …).
+# The app reaches it through the URL in Admin > Automation > Channel WhatsApp (config.base_url):
+#   runserver on the same machine: http://127.0.0.1:8080
+#   app in Docker on the same machine: http://host.docker.internal:8080 (or the server's IP)
+
+services:
+  evolution-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: evolution
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD:-evolution}
+      TZ: Asia/Jakarta
+    volumes:
+      - evolution_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  evolution:
+    image: atendai/evolution-api:v2.2.3
+    environment:
+      SERVER_URL: http://localhost:8080
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?Set EVOLUTION_API_KEY in .env}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD:-evolution}@evolution-db:5432/evolution
+      DATABASE_CONNECTION_CLIENT_NAME: washroom
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
+      DEL_INSTANCE: "false"
+      TZ: Asia/Jakarta
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - evolution_instances:/evolution/instances
+    depends_on:
+      evolution-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  evolution_pgdata:
+  evolution_instances:

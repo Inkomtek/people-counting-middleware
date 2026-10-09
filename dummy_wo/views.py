@@ -6,6 +6,7 @@ failure  -> 4xx [{"error": 1, "message": "..."}]  (the real error shape is not k
 """
 
 import json
+import re
 from datetime import timedelta
 
 from django.conf import settings
@@ -14,7 +15,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 
-from .models import WorkOrder
+from .models import InboxMessage, WorkOrder
 
 REQUIRED_FIELDS = ("token", "INSTANCE", "LOC_ID", "ASSET_ID", "REQ_TYP", "REQ_DESC")
 
@@ -70,3 +71,25 @@ def api_iot(request):
         return _reply(payload, False, 400, f"Field wajib kosong: {', '.join(missing)}")
 
     return _reply(payload, True, 200, "Work Order berhasil dibuat")
+
+
+SECRET_HEADERS = ("apikey", "authorization", "x-api-key")
+
+
+@csrf_exempt
+def inbox(request, kind, rest=""):
+    """Dummy receiver for Automation demos: accepts any message and stores it. A `kind` ending in
+    "-down" answers 503 (to demo failures and retries). Telegram bot tokens in the path are masked."""
+    try:
+        body = json.loads(request.body or b"null")
+    except ValueError:
+        body = {"raw": request.body.decode(errors="replace")[:2000]}
+    headers = {k: ("••••" if k.lower() in SECRET_HEADERS else v) for k, v in request.headers.items()
+               if k.lower() in SECRET_HEADERS or k.lower() == "content-type"}
+    path = re.sub(r"bot[^/]+", "bot••••", rest)
+    status = 503 if kind.endswith("-down") else 200
+    InboxMessage.objects.create(kind=kind, path=path[:300], method=request.method, headers=headers, body=body,
+                                response_status=status)
+    if status != 200:
+        return JsonResponse({"ok": False, "error": "service unavailable (dummy)"}, status=status)
+    return JsonResponse({"ok": True, "result": {"message_id": InboxMessage.objects.latest("pk").pk}})

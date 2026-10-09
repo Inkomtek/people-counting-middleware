@@ -74,15 +74,22 @@ def store_readings(items, client):
                     client=client,
                 )
                 created_count += 1
+                transaction.on_commit(lambda r=reading: _automation().reading_received(r))
             seen[key] = reading
             stored.append(reading)
     return stored, created_count
 
 
+def _automation():
+    from automation import engine
+
+    return engine
+
+
 def store_customer_responses(items, client):
     """Save validated rating dicts. A rating with an `id` already stored for its device (or repeated in the
     same batch) is skipped, so the sender can safely resend; without an `id` every item is new.
-    Returns (stored, created_count) like store_readings."""
+    Returns (stored, created_count) like store_readings. Automation rules run after commit for new ones."""
     stored, created_count, seen = [], 0, {}
     with transaction.atomic():
         for item in items:
@@ -104,6 +111,7 @@ def store_customer_responses(items, client):
                     client=client,
                 )
                 created_count += 1
+                transaction.on_commit(lambda r=response: _automation().rating_received(r))
             if external_id:
                 seen[key] = response
             stored.append(response)

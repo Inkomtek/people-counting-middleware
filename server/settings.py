@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     "dummy_wo",
     "dashboard",
     "washroom",
+    "automation",
 ]
 
 MIDDLEWARE = [
@@ -151,6 +152,20 @@ DUMMY_WO_TOKEN = os.getenv("DUMMY_WO_TOKEN", "")
 
 # Timeout (seconds) for outgoing HTTP requests to ZK and Work Order endpoints
 HTTP_TIMEOUT = 15
+
+# Automation email channel (SMTP, e.g. Gmail with an App Password). Without EMAIL_HOST emails are only
+# printed to the console (dev). Other channel secrets (TELEGRAM_BOT_TOKEN, EVOLUTION_API_KEY, ...) are
+# read from the environment by name at send time (automation.channels.secret).
+EMAIL_HOST = os.getenv("EMAIL_HOST", "")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True").lower() in ("1", "true", "yes")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "washroom@localhost")
+EMAIL_BACKEND = (
+    "django.core.mail.backends.smtp.EmailBackend" if EMAIL_HOST
+    else "django.core.mail.backends.console.EmailBackend"
+)
 
 # Admin exports (django-import-export): export only, CSV and XLSX.
 from import_export.formats.base_formats import CSV, XLSX  # noqa: E402

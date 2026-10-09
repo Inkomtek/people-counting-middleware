@@ -169,31 +169,6 @@ def fetch_new_events(client, device):
     return new_events
 
 
-def dispatch_work_orders(device):
-    """POST to every active notification endpoint and log each attempt. No retry."""
-    for endpoint in Endpoint.objects.filter(type=Endpoint.TYPE_NOTIFICATION, is_active=True):
-        try:
-            response = requests.post(
-                endpoint.url,
-                json=_fill_template(endpoint.body),
-                headers=_fill_template(endpoint.head) or None,
-                timeout=settings.HTTP_TIMEOUT,
-            )
-            status = f"{response.status_code} {response.reason}"
-            body = _response_json(response)
-        except requests.RequestException as exc:
-            status = "ERROR"
-            body = {"error": str(exc)}
-        NotificationLog.objects.create(
-            device=device,
-            endpoint_url=endpoint.url,
-            body=endpoint.body,
-            head=endpoint.head,
-            response=body,
-            response_status=status[:50],
-        )
-
-
 def apply_daily_count(device, events):
     """Mark countable events and add them to device.current_count, resetting it on a new WIB day.
 
@@ -241,10 +216,13 @@ def sync_device(device, client):
     )
 
     if device.current_count >= device.maximum_trigger:
-        dispatch_work_orders(device)
-        # Reset even if every POST failed (failures are only logged).
+        # Where the notification goes (Work Order, WhatsApp, cleaners, ...) is set by Automation rules.
+        from automation import engine
+
+        engine.people_threshold(device, device.current_count, device.maximum_trigger)
+        # Reset even if every send failed (failures are only logged).
         DeviceList.objects.filter(pk=device.pk).update(current_count=0)
-        logger.info("Device %s: Work Order dispatched, count reset to 0", device.device_id)
+        logger.info("Device %s: threshold reached, notifications sent, count reset to 0", device.device_id)
 
 
 BACKFILL_PAGE_SIZE = 100
