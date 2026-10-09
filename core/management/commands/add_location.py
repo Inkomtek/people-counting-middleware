@@ -24,8 +24,8 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
-        missing = sorted(set(options["device"]) - set(DeviceList.objects.filter(id__in=options["device"])
-                                                       .values_list("id", flat=True)))
+        missing = sorted(set(options["device"]) - set(DeviceList.objects.filter(device_id__in=options["device"])
+                                                       .values_list("device_id", flat=True)))
         if missing:
             raise CommandError(f"Unknown device ID(s): {', '.join(missing)}")
         try:
@@ -42,6 +42,6 @@ class Command(BaseCommand):
         assigned, _ = assign_devices(scope, options["device"])
         for device, previous in assigned:
             note = "" if previous in (None, scope) else f" (was: {previous})"
-            self.stdout.write(f"Device  assigned {device.id}{note}")
+            self.stdout.write(f"Device  assigned {device.device_id}{note}")
 
         self.stdout.write(self.style.SUCCESS(f"Location ready: {scope}"))

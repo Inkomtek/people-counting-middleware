@@ -70,7 +70,7 @@ class Command(BaseCommand):
             assigned, missing = assign_devices(scope, entry.get("devices", []))
             for device, previous in assigned:
                 note = f" (was: {previous})" if previous not in (None, scope) else ""
-                self.stdout.write(f"    device {device.id} assigned{note}")
+                self.stdout.write(f"    device {device.device_id} assigned{note}")
             for device_id in missing:
                 self.stdout.write(self.style.WARNING(f"    device {device_id} not on this server, skipped"))
         self.stdout.write(self.style.SUCCESS(f"{label}: done"))
@@ -99,7 +99,7 @@ class Command(BaseCommand):
 
     def _demo_device(self, scope, sensor_type):
         device, _ = DeviceList.objects.update_or_create(
-            id=f"{DEMO_PREFIX}{sensor_type.upper()}-{scope.pk}",
+            device_id=f"{DEMO_PREFIX}{sensor_type.upper()}-{scope.pk}",
             defaults={"type": sensor_type, "name": f"Demo {sensor_type}", "scope": scope},
         )
         return device
@@ -110,7 +110,7 @@ class Command(BaseCommand):
         real_clients = {entry["client"] for entry in real}
         real_regions = {entry["region"] for entry in real}
         clients = {entry["client"] for entry in demo} - real_clients
-        demo_devices, _ = DeviceList.objects.filter(id__startswith=DEMO_PREFIX).delete()
+        demo_devices, _ = DeviceList.objects.filter(device_id__startswith=DEMO_PREFIX).delete()
         deleted, _ = Client.objects.filter(name__in=clients).delete()
         regions = Region.objects.filter(name__in={entry["region"] for entry in demo} - real_regions, sites__isnull=True)
         region_count = regions.count()

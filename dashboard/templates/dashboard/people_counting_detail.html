@@ -55,7 +55,7 @@
     <label class="field"><span>{{ t.device_id }}</span>
       <select name="device" onchange="this.form.submit()">
         <option value="">{% tr "all_devices" n=module_devices|length %}</option>
-        {% for d in module_devices %}<option value="{{ d.id }}"{% if d == selected_device %} selected{% endif %}>{{ d.label }}</option>{% endfor %}
+        {% for d in module_devices %}<option value="{{ d.device_id }}"{% if d == selected_device %} selected{% endif %}>{{ d.label }}</option>{% endfor %}
       </select>
     </label>
     <label class="field"><span>{{ t.from }}</span><input type="date" name="start" value="{{ start|date:'Y-m-d' }}" max="{% now 'Y-m-d' %}" onchange="this.form.submit()"></label>
@@ -133,7 +133,14 @@
   </div>
   <div class="table-wrap" id="table">
     <table>
-      <thead><tr><th>{% if recap_period == "monthly" %}{{ t.month }}{% else %}{{ t.date }}{% endif %}</th><th class="num">{{ t.events_received }}</th><th class="num">{{ t.visitors_in }}</th><th class="num">{{ t.wo_sent }}</th><th class="num">{{ t.success }}</th><th class="num">{{ t.failed }}</th></tr></thead>
+      <thead><tr>
+        {% if recap_period == "monthly" %}{% include "dashboard/_sort_header.html" with h=recap_headers.period label=t.month %}{% else %}{% include "dashboard/_sort_header.html" with h=recap_headers.period label=t.date %}{% endif %}
+        {% include "dashboard/_sort_header.html" with h=recap_headers.total label=t.events_received num=True %}
+        {% include "dashboard/_sort_header.html" with h=recap_headers.people_in label=t.visitors_in num=True %}
+        {% include "dashboard/_sort_header.html" with h=recap_headers.sent label=t.wo_sent num=True %}
+        {% include "dashboard/_sort_header.html" with h=recap_headers.success label=t.success num=True %}
+        {% include "dashboard/_sort_header.html" with h=recap_headers.failed label=t.failed num=True %}
+      </tr></thead>
       <tbody>
         {% for r in recap %}
         <tr>

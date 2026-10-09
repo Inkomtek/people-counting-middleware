@@ -306,6 +306,20 @@ def notification_chart(devices, start, end):
 
 # ---------- recap ----------
 
+# Sortable recap-table columns: column key -> row field.
+RECAP_SORTS = {"period": "period", "total": "total", "people_in": "people_in", "sent": "sent",
+               "success": "success", "failed": "failed"}
+
+
+def sort_recap(rows, sort="", direction="asc"):
+    """Recap rows sorted by a column (RECAP_SORTS), newest period first among equal values; without a
+    column, the default newest-first order. Returns a new list, so the chart can keep using `rows`."""
+    if sort not in RECAP_SORTS:
+        return list(rows)
+    newest_first = sorted(rows, key=lambda row: row["period"], reverse=True)
+    return sorted(newest_first, key=lambda row: row[RECAP_SORTS[sort]], reverse=direction == "desc")
+
+
 def recap(devices, start, end, period=RECAP_DAILY):
     """Per day or month in the range, newest first, only periods with activity:
     events received (in/out only, like the Event Log), visitors in, Work Orders sent / succeeded /
@@ -379,9 +393,9 @@ def _as_date(value):
 # ---------- Work Orders ----------
 
 # Sortable columns of the Notification Log and Event Log tables: column key -> model fields (ascending).
-WO_SORTS = {"time": ("time",), "number": ("wo_number",), "device": ("device_id",),
+WO_SORTS = {"time": ("time",), "number": ("wo_number",), "device": ("device__device_id",),
             "destination": ("endpoint_url",), "status": ("success", "response_status")}
-EVENT_SORTS = {"time": ("time", "id"), "device": ("device_id",), "event": ("id",), "type": ("event_type",),
+EVENT_SORTS = {"time": ("time", "id"), "device": ("device__device_id",), "event": ("id",), "type": ("event_type",),
                "target": ("recognition_target",), "counted": ("counted",)}
 
 
@@ -465,7 +479,7 @@ def device_cards(device_filter, start, end, types):
     devices = sorted(
         DeviceList.objects.filter(type__in=types, **device_filter).exclude(type=DeviceList.TYPE_PEOPLE)
         .select_related("scope__area"),
-        key=lambda d: (order[d.type], d.name or d.id, d.id),
+        key=lambda d: (order[d.type], d.name or d.device_id, d.device_id),
     )
     since, until = range_bounds(start, end)
     readings = SensorReading.objects.filter(device__in=devices, time__gte=since, time__lt=until)

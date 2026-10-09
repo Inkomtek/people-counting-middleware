@@ -111,11 +111,13 @@ class ScopeAdmin(admin.ModelAdmin):
 
 
 @admin.register(DeviceList)
-class DeviceListAdmin(FixedIdAdmin):
-    list_display = ("id", "name", "type", "scope", "building", "floor", "gender", "current_count", "maximum_trigger",
+class DeviceListAdmin(admin.ModelAdmin):
+    # device_id is a normal editable field; the numeric `id` primary key is internal.
+    list_display = ("device_id", "name", "type", "scope", "building", "floor", "gender", "current_count", "maximum_trigger",
                     "baseline_done")
     list_filter = ("type", "scope__area__site__client", "scope__area__site", "building", "floor", "gender")
     list_editable = ("maximum_trigger",)
+    search_fields = ("device_id", "name")
     autocomplete_fields = ("scope",)
     list_select_related = ("scope__area__site__client", "scope__area__site__region")
 
@@ -184,8 +186,8 @@ def build_recap_rows(device_id="", date_from=None, date_to=None, limit=None):
     events = EventLog.objects.annotate(day=TruncDate("time"))
     notifications = NotificationLog.objects.annotate(day=TruncDate("time"))
     if device_id:
-        events = events.filter(device_id=device_id)
-        notifications = notifications.filter(device_id=device_id)
+        events = events.filter(device__device_id=device_id)
+        notifications = notifications.filter(device__device_id=device_id)
     if date_from:
         events = events.filter(day__gte=date_from)
         notifications = notifications.filter(day__gte=date_from)
@@ -240,7 +242,7 @@ class DailyRecapAdmin(ReadOnlyAdmin):
             "rows": rows,
             "recap_days": RECAP_DAYS,
             "filtered": filtered,
-            "devices": DeviceList.objects.values_list("id", flat=True),
+            "devices": DeviceList.objects.values_list("device_id", flat=True),
             "device_id": device_id,
             "date_from": date_from.isoformat() if date_from else "",
             "date_to": date_to.isoformat() if date_to else "",

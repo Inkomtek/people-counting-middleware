@@ -30,7 +30,7 @@ def severity_for_status(sensor_type, status, rules):
 
 def _get_device(device_id, device_type):
     """Only Admin-managed devices are allowed. Unknown device IDs are rejected earlier in validation."""
-    device = DeviceList.objects.filter(id=device_id).first()
+    device = DeviceList.objects.filter(device_id=device_id).first()
     if device is None:
         raise ValueError(f"Device ID {device_id} tidak terdaftar di admin.")
     if device.type != device_type:

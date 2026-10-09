@@ -27,7 +27,8 @@ def ensure_location(client, region, site, area, scope):
 
 def assign_devices(scope, device_ids):
     """Point the given devices at `scope`. Returns ([(device, previous scope)], [missing ids])."""
-    devices = {device.id: device for device in DeviceList.objects.filter(id__in=device_ids).select_related("scope")}
+    devices = {device.device_id: device
+               for device in DeviceList.objects.filter(device_id__in=device_ids).select_related("scope")}
     assigned = []
     for device_id in device_ids:
         device = devices.get(device_id)

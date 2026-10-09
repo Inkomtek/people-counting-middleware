@@ -107,7 +107,14 @@ class DeviceList(models.Model):
     GENDER_FEMALE = "female"
     GENDER_CHOICES = [(GENDER_MALE, "Pria"), (GENDER_FEMALE, "Wanita")]
 
-    id = models.CharField(primary_key=True, max_length=100)
+    # Numeric primary key; every other table points at it, so editing device_id keeps the history linked.
+    id = models.BigAutoField(primary_key=True)
+    # The device's own ID: ZK deviceId for people counters, `device_id` in the washroom API. Editable.
+    device_id = models.CharField(
+        max_length=100, unique=True,
+        help_text="The device's own ID (ZK deviceId / washroom API device_id). Editable; "
+                  "history stays linked because other tables point at the numeric id.",
+    )
     type = models.CharField(max_length=100, choices=TYPE_CHOICES, default=TYPE_PEOPLE)
     # Readable label for the dashboard's device dropdown, e.g. "Pintu Utama"; falls back to the id.
     name = models.CharField(max_length=100, blank=True)
@@ -129,11 +136,11 @@ class DeviceList(models.Model):
         verbose_name = "device"
 
     def __str__(self):
-        return self.name or self.id
+        return self.name or self.device_id
 
     @property
     def label(self):
-        return self.name or self.id
+        return self.name or self.device_id
 
 
 class SchedulerConfig(models.Model):

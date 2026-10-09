@@ -76,7 +76,7 @@ class Command(BaseCommand):
         # their location in Admin.
         for device_type in [*READING_TYPES, SATISFACTION_TYPE]:
             DeviceList.objects.update_or_create(
-                id=self.device_id(device_type, toilet),
+                device_id=self.device_id(device_type, toilet),
                 defaults={"type": device_type, "name": f"Dummy {device_type}", **toilet},
             )
 
@@ -178,7 +178,7 @@ class Command(BaseCommand):
 
     def cleanup(self):
         # Readings and ratings cascade with their devices.
-        devices = DeviceList.objects.filter(id__startswith=DUMMY_PREFIX)
+        devices = DeviceList.objects.filter(device_id__startswith=DUMMY_PREFIX)
         count = devices.count()
         devices.delete()
         clients, _ = ApiClient.objects.filter(name=DUMMY_CLIENT).delete()

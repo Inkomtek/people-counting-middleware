@@ -26,7 +26,7 @@ class Command(BaseCommand):
 
         devices = DeviceList.objects.filter(type=DeviceList.TYPE_PEOPLE)
         if options["device"]:
-            devices = devices.filter(id=options["device"])
+            devices = devices.filter(device_id=options["device"])
             if not devices:
                 raise CommandError(f"Device {options['device']} not found")
 
@@ -35,9 +35,9 @@ class Command(BaseCommand):
             try:
                 stored, relabeled = backfill_events(client, device, start)
             except ZKError as exc:
-                self.stderr.write(f"Device {device.id}: backfill failed: {exc}")
+                self.stderr.write(f"Device {device.device_id}: backfill failed: {exc}")
                 continue
             self.stdout.write(self.style.SUCCESS(
-                f"Device {device.id}: {stored} events stored since {start:%Y-%m-%d %H:%M}, "
+                f"Device {device.device_id}: {stored} events stored since {start:%Y-%m-%d %H:%M}, "
                 f"{relabeled} existing events relabeled."
             ))

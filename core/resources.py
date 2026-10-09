@@ -22,7 +22,7 @@ class LogResource(resources.ModelResource):
     """Times in Asia/Jakarta, device as its ID and JSON fields as full JSON text."""
 
     time = fields.Field(attribute="time", column_name="time")
-    device = fields.Field(attribute="device_id", column_name="device")
+    device = fields.Field(attribute="device__device_id", column_name="device")
 
     json_fields = ()
 

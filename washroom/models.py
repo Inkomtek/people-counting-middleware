@@ -107,7 +107,7 @@ class SensorReading(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.device_id} - {self.time}"
+        return f"{self.device.device_id} - {self.time}"
 
 
 class CustomerResponse(models.Model):

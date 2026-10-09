@@ -71,7 +71,7 @@ def _filter(queryset, params):
     """Filters shared by both list endpoints; location filters follow the dashboard's toilet fields."""
     device_id = params.get("device_id") or params.get("deviceId")
     if device_id:
-        queryset = queryset.filter(device_id=device_id)
+        queryset = queryset.filter(device__device_id=device_id)
     for field in ("building", "floor", "gender"):
         if params.get(field):
             queryset = queryset.filter(**{f"device__{field}": params[field]})

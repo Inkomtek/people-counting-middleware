@@ -109,8 +109,8 @@ def _selection(request, lang, default_preset="today"):
 
 def _module_devices(ctx, module, selected_id=""):
     """Devices of one module (DeviceList.type) at the selected toilet; `selected_id` narrows to one."""
-    devices = list(DeviceList.objects.filter(type=module, **ctx["location"]["device_filter"]).order_by("name", "id"))
-    selected = next((d for d in devices if d.id == selected_id), None)
+    devices = list(DeviceList.objects.filter(type=module, **ctx["location"]["device_filter"]).order_by("name", "device_id"))
+    selected = next((d for d in devices if d.device_id == selected_id), None)
     ctx.update(module_devices=devices, selected_device=selected)
     return [selected] if selected else devices
 
@@ -223,7 +223,7 @@ def overview(request, lang):
     q = request.GET.get("q", "").strip()[:100]
     devices = _module_devices(ctx, DeviceList.TYPE_PEOPLE)
     if q:
-        devices = [device for device in devices if q.lower() in device.id.lower() or q.lower() in (device.name or "").lower()]
+        devices = [device for device in devices if q.lower() in device.device_id.lower() or q.lower() in (device.name or "").lower()]
         ctx["location_query"] += f"&{urlencode({'q': q})}"
         ctx["filter_query"] += f"&{urlencode({'q': q})}"
     _sensor_context(ctx, devices)
@@ -252,7 +252,7 @@ def overview(request, lang):
         people_cards = [{"device": row["device"], "type": DeviceList.TYPE_PEOPLE, "location": row["location"],
                          "has_data": True, "people": row, "url": _people_card_url(row["device"], ctx)}
                         for row in sorted(queries.sensor_table(devices, ctx["start"], ctx["end"]),
-                                          key=lambda r: (r["device"].name or r["device"].id, r["device"].id))]
+                                          key=lambda r: (r["device"].name or r["device"].device_id, r["device"].device_id))]
         cards = people_cards + cards
     # People counters have no reading: ONLINE counts as normal, OFFLINE as no data.
     card_status = dict(summary["status_by_device"])
@@ -260,7 +260,7 @@ def overview(request, lang):
                         for card in cards if card["type"] == DeviceList.TYPE_PEOPLE})
     if q:
         needle = q.lower()
-        cards = [card for card in cards if needle in card["device"].id.lower() or needle in (card["device"].name or "").lower()]
+        cards = [card for card in cards if needle in card["device"].device_id.lower() or needle in (card["device"].name or "").lower()]
     # The 6 status boxes above the cards count what the cards show before the status filter
     # (location, dates, type and search all apply), so a box's number matches its result.
     statuses = [card_status.get(card["device"].id) for card in cards]
@@ -310,7 +310,7 @@ DEMO_PREFIXES = ("DEMO-", "DUMMY-")
 def _people_card_url(device, ctx):
     """A real people counter's card opens People Counting for its toilet (or the unassigned group) at the
     sensor table; demo/dummy devices are not links."""
-    if device.id.upper().startswith(DEMO_PREFIXES):
+    if device.device_id.upper().startswith(DEMO_PREFIXES):
         return None
     where = f"scope={device.scope_id}" if device.scope_id else f"client={locations.UNASSIGNED}"
     return f"{reverse('dashboard:people_counting')}?{where}&{ctx['range_query']}#sensor-table"
@@ -413,7 +413,8 @@ def people_counting_detail(request, lang):
     if tab == "recap":
         period = _recap_period(params)
         rows, totals = queries.recap(devices, start, end, period)
-        recap_page, ctx["pager"] = _paginate(request, rows, anchor="table")
+        sort, direction, ctx["recap_headers"] = _column_sort(request, queries.RECAP_SORTS, anchor="table")
+        recap_page, ctx["pager"] = _paginate(request, queries.sort_recap(rows, sort, direction), anchor="table")
         ctx.update(recap=list(recap_page), recap_totals=totals, recap_period=period,
                    traffic=_label_days(queries.period_traffic(rows, start, end, period),
                                        monthly=period == queries.RECAP_MONTHLY))
@@ -459,7 +460,8 @@ def export(request, lang, kind, fmt):
         data = tablib.Dataset(headers=[t["month"] if monthly else t["date"], t["events_received"], t["visitors_in"],
                                        t["wo_sent"], t["success"], t["failed"]])
         rows, _ = queries.recap(devices, start, end, queries.RECAP_MONTHLY if monthly else queries.RECAP_DAILY)
-        for row in rows:
+        sort, direction, _ = _column_sort(request, queries.RECAP_SORTS)
+        for row in queries.sort_recap(rows, sort, direction):
             data.append([row["period"].strftime("%Y-%m") if monthly else row["period"].isoformat(),
                          row["total"], row["people_in"], row["sent"], row["success"], row["failed"]])
         prefix = f"{t['export_recap']}-{t['export_monthly'] if monthly else t['export_daily']}"
@@ -469,7 +471,7 @@ def export(request, lang, kind, fmt):
         sort, direction, _ = _column_sort(request, queries.WO_SORTS)
         for log in queries.work_orders(devices, start, end, status, params.get("q", "").strip(), sort, direction):
             row = queries.work_order_row(log)
-            data.append([_local(log.time), row["wo_number"], log.device_id, row["destination"], log.response_status])
+            data.append([_local(log.time), row["wo_number"], log.device.device_id, row["destination"], log.response_status])
         prefix = t["export_wo"]
     else:
         data = tablib.Dataset(headers=[t["time"], t["device_id"], t["event_id"], t["event_type"],
@@ -478,7 +480,7 @@ def export(request, lang, kind, fmt):
         logs = queries.events(devices, start, end, parse_time(params.get("time_from") or ""),
                               parse_time(params.get("time_to") or ""), params.get("event_type", ""), sort, direction)
         for log in logs:
-            data.append([_local(log.time), log.device_id, log.id, log.event_type,
+            data.append([_local(log.time), log.device.device_id, log.id, log.event_type,
                          log.recognition_target, t["yes"] if log.counted else t["no"]])
         prefix = t["export_events"]
 

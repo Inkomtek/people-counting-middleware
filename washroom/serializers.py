@@ -10,7 +10,7 @@ TIME_HELP = "ISO 8601. Without offset it is read as WIB. Default: time received.
 
 def registered_device(device_id, allowed_types, field="device_id"):
     """The Admin-registered device with that ID, if its type is one of `allowed_types`."""
-    registered = DeviceList.objects.filter(pk=device_id).first()
+    registered = DeviceList.objects.filter(device_id=device_id).first()
     if not registered:
         raise serializers.ValidationError(
             {field: "Device ID tidak terdaftar di admin. Harap daftarkan device terlebih dahulu."}
@@ -83,7 +83,7 @@ class ReadingOutSerializer(DeviceLocationMixin, serializers.ModelSerializer):
 
     reading_id = serializers.IntegerField(source="pk")
     id = serializers.CharField(source="external_id")
-    deviceId = serializers.CharField(source="device_id")
+    deviceId = serializers.CharField(source="device.device_id")
     type = serializers.CharField(source="device.type")
     inputDate = serializers.DateTimeField(source="time")
     value = serializers.FloatField(source="level", allow_null=True)
@@ -98,6 +98,7 @@ class ReadingOutSerializer(DeviceLocationMixin, serializers.ModelSerializer):
 
 class CustomerResponseOutSerializer(DeviceLocationMixin, serializers.ModelSerializer):
     response_id = serializers.IntegerField(source="id")
+    device_id = serializers.CharField(source="device.device_id")
 
     class Meta:
         model = CustomerResponse

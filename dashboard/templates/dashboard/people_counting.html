@@ -195,7 +195,7 @@
       <tbody>
         {% for s in sensor_rows %}
         <tr>
-          <td><strong>{{ s.device.label }}</strong>{% if s.device.name %}<br><span class="muted mono small">{{ s.device.id }}</span>{% endif %}</td>
+          <td><strong>{{ s.device.label }}</strong>{% if s.device.name %}<br><span class="muted mono small">{{ s.device.device_id }}</span>{% endif %}</td>
           {% if not scope_selected %}<td class="small">{{ s.location|default:"–" }}</td>{% endif %}
           <td class="count-cell">
             <div class="sensor-progress">

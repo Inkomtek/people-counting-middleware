@@ -12,7 +12,7 @@
       {% for e in event_rows %}
       <tr>
         <td class="nowrap">{{ e.time|date:"H:i:s" }} WIB<br><span class="muted small">{{ e.time|date:"D, d M Y" }}</span></td>
-        <td class="mono small">{{ e.device_id }}</td>
+        <td class="mono small">{{ e.device.device_id }}</td>
         <td class="mono small">{{ e.id }}</td>
         <td><span class="badge {% if e.event_type == 'in' %}badge--ok{% else %}badge--soon{% endif %}"><i class="dot"></i>{{ e.event_type }}</span></td>
         <td>{{ e.recognition_target }}</td>

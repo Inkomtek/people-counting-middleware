@@ -41,7 +41,7 @@ def page(items):
 @override_settings(ZK_CLIENT_ID="cid", ZK_CLIENT_SECRET="secret")
 class SyncDeviceTests(TestCase):
     def setUp(self):
-        self.device = DeviceList.objects.get(id=DEVICE_ID)
+        self.device = DeviceList.objects.get(device_id=DEVICE_ID)
         self.device.baseline_done = True
         self.device.maximum_trigger = 3
         self.device.save()
@@ -189,7 +189,7 @@ class DailyRecapAdminTests(TestCase):
     def test_recap_shows_daily_totals(self):
         from django.contrib.auth.models import User
 
-        device = DeviceList.objects.get(id=DEVICE_ID)
+        device = DeviceList.objects.get(device_id=DEVICE_ID)
         EventLog.objects.create(id="a", time="2026-10-01T10:00:00+07:00", device=device, counted=True)
         EventLog.objects.create(id="b", time="2026-10-01T11:00:00+07:00", device=device, counted=False)
         NotificationLog.objects.create(device=device, endpoint_url="x", response_status="200 OK")
@@ -208,7 +208,7 @@ class ExportTests(TestCase):
     def setUp(self):
         from django.contrib.auth.models import User
 
-        self.device = DeviceList.objects.get(id=DEVICE_ID)
+        self.device = DeviceList.objects.get(device_id=DEVICE_ID)
         self.client.force_login(User.objects.create_superuser("admin", "", "pw"))
 
     def export_csv(self, url):
@@ -292,7 +292,7 @@ class BackfillTests(TestCase):
 
         from django.utils import timezone
 
-        device = DeviceList.objects.get(id=DEVICE_ID)
+        device = DeviceList.objects.get(device_id=DEVICE_ID)
         device.current_count = 5
         device.save()
         EventLog.objects.create(id="known", time="2026-10-01T11:00:00+07:00", device=device,
@@ -328,7 +328,7 @@ class EventLogTimeRangeFilterTests(TestCase):
     def test_filters_events_by_time_range(self):
         from django.contrib.auth.models import User
 
-        device = DeviceList.objects.get(id=DEVICE_ID)
+        device = DeviceList.objects.get(device_id=DEVICE_ID)
         for event_id, hour in (("early", 8), ("mid", 10), ("late", 12)):
             EventLog.objects.create(id=event_id, time=f"2026-10-01T{hour:02d}:00:00+07:00", device=device)
         self.client.force_login(User.objects.create_superuser("admin", "", "pw"))
@@ -359,7 +359,7 @@ class AddLocationCommandTests(TestCase):
         output = self.run_command("--device", "2069691213314072577")
         scope = Scope.objects.get(name="Floor 2 - Toilet Pria")
         self.assertEqual(str(scope), "ISS · Banten · Bintaro · Graha ISS · Floor 2 - Toilet Pria")
-        self.assertEqual(DeviceList.objects.get(id="2069691213314072577").scope, scope)
+        self.assertEqual(DeviceList.objects.get(device_id="2069691213314072577").scope, scope)
         self.assertIn("Scope   created", output)
 
     def test_is_idempotent(self):
@@ -398,7 +398,7 @@ class WorkOrderOutcomeTests(TestCase):
         self.assertEqual(work_order_outcome("200 OK", None), (True, ""))
 
     def test_log_stores_outcome_on_save(self):
-        device = DeviceList.objects.get(id="2069691213314072577")
+        device = DeviceList.objects.get(device_id="2069691213314072577")
         log = NotificationLog.objects.create(
             device=device, endpoint_url="x", response_status="200 OK",
             response=[{"error": 0, "results": [{"WO_NO": "280268"}]}],
@@ -427,7 +427,7 @@ class SeedLocationsCommandTests(TestCase):
         self.run_command()  # idempotent
         self.assertEqual(list(Client.objects.values_list("name", flat=True)), ["ISS"])
         self.assertEqual(Scope.objects.count(), 1)
-        self.assertEqual(DeviceList.objects.get(id="2069691213314072577").scope.name, "Floor 2 - Toilet Pria")
+        self.assertEqual(DeviceList.objects.get(device_id="2069691213314072577").scope.name, "Floor 2 - Toilet Pria")
 
     def test_demo_and_cleanup(self):
         from core.models import Client, Region, Scope
@@ -438,21 +438,21 @@ class SeedLocationsCommandTests(TestCase):
         from washroom.models import CustomerResponse, SensorReading
 
         # 3 demo toilets x (5 reading sensors + 1 satisfaction).
-        self.assertEqual(DeviceList.objects.filter(id__startswith="DEMO-").count(), 18)
+        self.assertEqual(DeviceList.objects.filter(device_id__startswith="DEMO-").count(), 18)
         self.assertEqual(SensorReading.objects.count(), 15)
         self.assertEqual(CustomerResponse.objects.count(), 30)
         self.assertTrue(SensorReading.objects.exclude(severity="").exists())
         self.run_command("--demo")  # devices are reused
-        self.assertEqual(DeviceList.objects.filter(id__startswith="DEMO-").count(), 18)
-        demo_device = DeviceList.objects.create(id="demo-dev", scope=Scope.objects.get(name="Lobby - Toilet Pria"))
+        self.assertEqual(DeviceList.objects.filter(device_id__startswith="DEMO-").count(), 18)
+        demo_device = DeviceList.objects.create(device_id="demo-dev", scope=Scope.objects.get(name="Lobby - Toilet Pria"))
         self.run_command("--cleanup-demo")
         self.assertEqual(list(Client.objects.values_list("name", flat=True)), ["ISS"])
         self.assertEqual(list(Region.objects.values_list("name", flat=True)), ["Banten"])
-        self.assertFalse(DeviceList.objects.filter(id__startswith="DEMO-").exists())
+        self.assertFalse(DeviceList.objects.filter(device_id__startswith="DEMO-").exists())
         self.assertFalse(SensorReading.objects.exists())
         demo_device.refresh_from_db()
         self.assertIsNone(demo_device.scope)  # device kept, back to "unassigned"
-        self.assertIsNotNone(DeviceList.objects.get(id="2069691213314072577").scope)
+        self.assertIsNotNone(DeviceList.objects.get(device_id="2069691213314072577").scope)
 
     def test_missing_device_is_skipped(self):
         import json
@@ -481,31 +481,42 @@ class SeedLocationsCommandTests(TestCase):
 
 
 class PrimaryKeyAdminTests(TestCase):
-    """Editing a device or endpoint in Admin must update it, never save a copy under a new id."""
+    """Editing a device (its device_id is editable) or an endpoint in Admin must update the same row."""
 
     def setUp(self):
         from django.contrib.auth.models import User
 
         self.client.force_login(User.objects.create_superuser("admin", "admin@example.com", "pw"))
 
-    def test_editing_a_device_keeps_its_id(self):
-        device = DeviceList.objects.create(id="SOAP-1", type="soap", name="Sabun lama", maximum_trigger=10)
+    def test_editing_device_id_updates_the_same_row_and_keeps_history(self):
+        device = DeviceList.objects.create(device_id="SOAP-1", type="soap", name="Sabun lama", maximum_trigger=10)
+        EventLog.objects.create(id="ev-1", time="2026-10-01T10:00:00+07:00", device=device)
         response = self.client.post(f"/admin/core/devicelist/{device.pk}/change/", {
-            "id": "SOAP-1-NEW", "type": "soap", "name": "Sabun baru", "current_count": 0, "maximum_trigger": 12,
-            "building": "", "floor": "", "gender": "",
+            "device_id": "SOAP-1-NEW", "type": "soap", "name": "Sabun baru", "current_count": 0,
+            "maximum_trigger": 12, "building": "", "floor": "", "gender": "",
         })
         self.assertEqual(response.status_code, 302, response.content[:2000])
-        self.assertEqual(list(DeviceList.objects.filter(id__startswith="SOAP-1").values_list("id", "name")),
-                         [("SOAP-1", "Sabun baru")])
-        self.assertContains(self.client.get(f"/admin/core/devicelist/{device.pk}/change/"), "SOAP-1")
+        device.refresh_from_db()
+        self.assertEqual((device.device_id, device.name), ("SOAP-1-NEW", "Sabun baru"))
+        self.assertFalse(DeviceList.objects.filter(device_id="SOAP-1").exists())
+        self.assertEqual(EventLog.objects.get(id="ev-1").device, device)
 
-    def test_new_device_still_takes_its_id(self):
+    def test_new_device_takes_the_typed_device_id(self):
         response = self.client.post("/admin/core/devicelist/add/", {
-            "id": "TISSUE-9", "type": "tissue", "name": "Tisu", "current_count": 0, "maximum_trigger": 10,
+            "device_id": "TISSUE-9", "type": "tissue", "name": "Tisu", "current_count": 0, "maximum_trigger": 10,
             "building": "", "floor": "", "gender": "",
         })
         self.assertEqual(response.status_code, 302, response.content[:2000])
-        self.assertTrue(DeviceList.objects.filter(id="TISSUE-9").exists())
+        self.assertTrue(DeviceList.objects.filter(device_id="TISSUE-9").exists())
+
+    def test_device_id_must_be_unique(self):
+        DeviceList.objects.create(device_id="TISSUE-9", type="tissue")
+        response = self.client.post("/admin/core/devicelist/add/", {
+            "device_id": "TISSUE-9", "type": "tissue", "name": "", "current_count": 0, "maximum_trigger": 10,
+            "building": "", "floor": "", "gender": "",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(DeviceList.objects.filter(device_id="TISSUE-9").count(), 1)
 
     def test_editing_an_endpoint_keeps_its_id(self):
         from core.models import Endpoint

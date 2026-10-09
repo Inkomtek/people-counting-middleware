@@ -93,7 +93,7 @@ def raw(device_id, data_id="1", **fields):
 
 class ReadingTests(ApiTestCase):
     def test_reading_in_sensor_team_format(self):
-        DeviceList.objects.create(id="TIS1", type="tissue", **TOILET)
+        DeviceList.objects.create(device_id="TIS1", type="tissue", **TOILET)
         response = self.post(READINGS_URL, {
             "id": "1", "inputDate": "2026-08-19T10:15:30Z", "deviceId": "TIS1", "value": 60, "battery": 81,
             "lastOnline": "2026-08-19T10:15:30Z", "status": "Terisi",
@@ -113,8 +113,8 @@ class ReadingTests(ApiTestCase):
         self.assertEqual((reading.payload["value"], reading.client), (60, self.api_client))
 
     def test_status_and_value_are_stored_as_sent(self):
-        DeviceList.objects.create(id="A", type="soap")
-        DeviceList.objects.create(id="C", type="ammonia")
+        DeviceList.objects.create(device_id="A", type="soap")
+        DeviceList.objects.create(device_id="C", type="ammonia")
         response = self.post(READINGS_URL, [
             raw("A", value=150, status="Status Baru"),
             raw("C", value=None, status=None),
@@ -125,13 +125,13 @@ class ReadingTests(ApiTestCase):
                          [(150, "Status Baru", ""), (None, "", "")])
 
     def test_severity_matches_status_case_insensitively(self):
-        DeviceList.objects.create(id="B", type="trash")
+        DeviceList.objects.create(device_id="B", type="trash")
         response = self.post(READINGS_URL, raw("B", value=95, status="penuh"))
         self.assertEqual(response.json()["data"]["severity"], "critical")
 
     def test_resent_id_is_skipped_per_device(self):
-        DeviceList.objects.create(id="A", type="soap")
-        DeviceList.objects.create(id="B", type="soap")
+        DeviceList.objects.create(device_id="A", type="soap")
+        DeviceList.objects.create(device_id="B", type="soap")
         self.assertEqual(self.post(READINGS_URL, raw("A", "7", value=10)).status_code, 201)
         response = self.post(READINGS_URL, [raw("A", "7", value=99), raw("B", "7", value=20), raw("B", "7")])
         self.assertEqual(response.status_code, 201)
@@ -143,7 +143,7 @@ class ReadingTests(ApiTestCase):
         self.assertEqual((again.status_code, again.json()["created"]), (200, 0))
 
     def test_required_fields(self):
-        DeviceList.objects.create(id="A", type="soap")
+        DeviceList.objects.create(device_id="A", type="soap")
         response = self.post(READINGS_URL, {"deviceId": "A", "value": 10})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(set(response.json()["errors"][0]["errors"]), {"id", "inputDate"})
@@ -152,10 +152,10 @@ class ReadingTests(ApiTestCase):
         response = self.post(READINGS_URL, raw("NEW", value=0))
         self.assertEqual(response.status_code, 400)
         self.assertIn("Device ID tidak terdaftar", response.json()["errors"][0]["errors"]["deviceId"][0])
-        self.assertFalse(DeviceList.objects.filter(id="NEW").exists())
+        self.assertFalse(DeviceList.objects.filter(device_id="NEW").exists())
 
     def test_people_and_satisfaction_devices_cannot_send_readings(self):
-        DeviceList.objects.create(id="FB1", type="satisfaction")
+        DeviceList.objects.create(device_id="FB1", type="satisfaction")
         for device_id in ("2069691213314072577", "FB1"):
             response = self.post(READINGS_URL, raw(device_id, value=10))
             self.assertEqual(response.status_code, 400)
@@ -164,27 +164,27 @@ class ReadingTests(ApiTestCase):
     def test_registered_devices_are_never_synced_from_zk(self):
         from core import services
 
-        DeviceList.objects.create(id="SOAP-ADMIN-01", type="soap")
+        DeviceList.objects.create(device_id="SOAP-ADMIN-01", type="soap")
         with mock.patch.object(services, "sync_device") as sync_device, \
                 mock.patch.object(services.ZKClient, "__init__", return_value=None):
             services.sync_all()
         self.assertNotIn("SOAP-ADMIN-01", [call.args[0].id for call in sync_device.call_args_list])
 
     def test_invalid_item_rejects_whole_batch(self):
-        DeviceList.objects.create(id="A", type="soap")
+        DeviceList.objects.create(device_id="A", type="soap")
         response = self.post(READINGS_URL, [raw("A", value=50), raw("A", "2", battery=120)])
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["errors"][0]["index"], 1)
         self.assertFalse(SensorReading.objects.exists())
 
     def test_url_without_trailing_slash(self):
-        DeviceList.objects.create(id="A", type="soap")
+        DeviceList.objects.create(device_id="A", type="soap")
         self.assertEqual(self.post(READINGS_URL.rstrip("/"), raw("A", value=5)).status_code, 201)
 
     def test_list_filters_by_toilet_and_type(self):
-        DeviceList.objects.create(id="A", type="soap", **TOILET)
-        DeviceList.objects.create(id="B", type="soap", **{**TOILET, "gender": "female"})
-        DeviceList.objects.create(id="C", type="trash", **TOILET)
+        DeviceList.objects.create(device_id="A", type="soap", **TOILET)
+        DeviceList.objects.create(device_id="B", type="soap", **{**TOILET, "gender": "female"})
+        DeviceList.objects.create(device_id="C", type="trash", **TOILET)
         self.post(READINGS_URL, [raw("A", value=1), raw("B", value=1), raw("C", value=1)])
         response = self.get(READINGS_URL, {**TOILET, "type": "soap"})
         self.assertEqual(response.status_code, 200)
@@ -193,8 +193,8 @@ class ReadingTests(ApiTestCase):
 
     def test_location_hierarchy_in_output_and_scope_filter(self):
         scope = make_scope()
-        DeviceList.objects.create(id="A", type="soap", scope=scope)
-        DeviceList.objects.create(id="B", type="soap")
+        DeviceList.objects.create(device_id="A", type="soap", scope=scope)
+        DeviceList.objects.create(device_id="B", type="soap")
         response = self.post(READINGS_URL, [raw("A", value=1), raw("B", value=1)])
         self.assertEqual([r["location"] for r in response.json()["data"]], [
             {"client": "ISS", "region": "Banten", "site": "Bintaro", "area": "Graha ISS",
@@ -211,29 +211,29 @@ class ReadingTests(ApiTestCase):
 
 class CustomerResponseTests(ApiTestCase):
     def test_post_rating_on_registered_satisfaction_device(self):
-        DeviceList.objects.create(id="FB01", type="satisfaction")
+        DeviceList.objects.create(device_id="FB01", type="satisfaction")
         response = self.post(RESPONSES_URL, {"device_id": "FB01", "rating": 5, "comment": "bersih"})
         self.assertEqual(response.status_code, 201, response.json())
         self.assertEqual(CustomerResponse.objects.get().rating, 5)
-        self.assertEqual(DeviceList.objects.get(id="FB01").type, "satisfaction")
+        self.assertEqual(DeviceList.objects.get(device_id="FB01").type, "satisfaction")
 
     def test_unknown_device_is_rejected(self):
         response = self.post(RESPONSES_URL, {"device_id": "FB-UNKNOWN", "rating": 5, "comment": "bersih"})
         self.assertEqual(response.status_code, 400)
         self.assertIn("Device ID tidak terdaftar", response.json()["errors"][0]["errors"]["device_id"][0])
-        self.assertFalse(DeviceList.objects.filter(id="FB-UNKNOWN").exists())
+        self.assertFalse(DeviceList.objects.filter(device_id="FB-UNKNOWN").exists())
 
     def test_rating_out_of_range_rejected(self):
-        DeviceList.objects.create(id="FB01", type="satisfaction")
+        DeviceList.objects.create(device_id="FB01", type="satisfaction")
         self.assertEqual(self.post(RESPONSES_URL, {"device_id": "FB01", "rating": 6}).status_code, 400)
 
     def test_sensor_device_cannot_send_ratings(self):
-        DeviceList.objects.create(id="SOAP1", type="soap")
+        DeviceList.objects.create(device_id="SOAP1", type="soap")
         self.assertEqual(self.post(RESPONSES_URL, {"device_id": "SOAP1", "rating": 4}).status_code, 400)
 
     def test_list_filters_by_toilet(self):
-        DeviceList.objects.create(id="FB1", type="satisfaction", **TOILET)
-        DeviceList.objects.create(id="FB2", type="satisfaction", **{**TOILET, "floor": "3"})
+        DeviceList.objects.create(device_id="FB1", type="satisfaction", **TOILET)
+        DeviceList.objects.create(device_id="FB2", type="satisfaction", **{**TOILET, "floor": "3"})
         self.post(RESPONSES_URL, [{"device_id": "FB1", "rating": 5}, {"device_id": "FB2", "rating": 1}])
         results = self.get(RESPONSES_URL, {"floor": "2"}).json()["results"]
         self.assertEqual([(r["device_id"], r["floor"]) for r in results], [("FB1", "2")])
@@ -283,7 +283,7 @@ class SendDummyDataCommandTests(TestCase):
     def test_sends_every_type_to_the_people_counter_toilet(self):
         output = self.run_command("--scenario", "critical", "--ratings", "3")
         self.assertEqual(output.count("HTTP 201"), 2)
-        devices = DeviceList.objects.filter(id__startswith="DUMMY-")
+        devices = DeviceList.objects.filter(device_id__startswith="DUMMY-")
         self.assertEqual(
             sorted(devices.values_list("type", flat=True)),
             sorted(["soap", "toilet-paper", "tissue", "trash", "ammonia", "satisfaction"]),
@@ -296,10 +296,10 @@ class SendDummyDataCommandTests(TestCase):
         scope = make_scope()
         DeviceList.objects.filter(type="people").update(scope=scope)
         self.assertEqual(self.run_command("--ratings", "1").count("HTTP 201"), 2)
-        devices = DeviceList.objects.filter(id__startswith="DUMMY-")
+        devices = DeviceList.objects.filter(device_id__startswith="DUMMY-")
         self.assertEqual(devices.count(), 6)
         self.assertFalse(devices.exclude(scope=scope).exists())
-        self.assertTrue(devices.filter(id=f"DUMMY-SOAP-S{scope.pk}").exists())
+        self.assertTrue(devices.filter(device_id=f"DUMMY-SOAP-S{scope.pk}").exists())
 
     def test_default_base_url_prefers_docker_alias(self):
         from washroom.management.commands import send_dummy_data as command
@@ -314,10 +314,10 @@ class SendDummyDataCommandTests(TestCase):
             self.run_command("--scope", "999")
 
     def test_cleanup_removes_dummy_data_only(self):
-        DeviceList.objects.create(id="REAL-1", type="soap")
+        DeviceList.objects.create(device_id="REAL-1", type="soap")
         self.run_command()
         self.run_command("--cleanup")
-        self.assertFalse(DeviceList.objects.filter(id__startswith="DUMMY-").exists())
-        self.assertEqual(DeviceList.objects.filter(id__in=["REAL-1", "2069691213314072577"]).count(), 2)
+        self.assertFalse(DeviceList.objects.filter(device_id__startswith="DUMMY-").exists())
+        self.assertEqual(DeviceList.objects.filter(device_id__in=["REAL-1", "2069691213314072577"]).count(), 2)
         self.assertFalse(SensorReading.objects.exists() or CustomerResponse.objects.exists())
         self.assertFalse(ApiClient.objects.filter(name="dummy-tester").exists())

@@ -14,7 +14,7 @@
   </div>
   <div class="device-title">
     <h2 class="section-name truncate" title="{{ card.device.label }}">{{ card.device.label }}</h2>
-    {% if card.device.name %}<span class="muted mono small truncate">ID {{ card.device.id }}</span>{% endif %}
+    {% if card.device.name %}<span class="muted mono small truncate">ID {{ card.device.device_id }}</span>{% endif %}
     {% if not scope_selected %}<span class="muted small truncate" title="{{ card.location|default:t.unassigned }}">{{ card.location|default:t.unassigned }}</span>{% endif %}
   </div>
 

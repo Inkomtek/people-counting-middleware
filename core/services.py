@@ -81,7 +81,7 @@ class ZKClient:
         params = {
             "page": page,
             "pageSize": page_size or self.event_endpoint.body.get("pageSize", 10),
-            "deviceId": device.id,
+            "deviceId": device.device_id,
             "type": EVENT_TYPE_CROSS_LINE,
         }
         headers = {**(self.event_endpoint.head or {}), "Authorization": f"Bearer {self.token}"}
@@ -165,7 +165,7 @@ def fetch_new_events(client, device):
         if existing or len(items) < page_size or not device.baseline_done:
             break
     else:
-        logger.warning("Device %s: reached MAX_PAGES (%s), older new events may be skipped", device.id, MAX_PAGES)
+        logger.warning("Device %s: reached MAX_PAGES (%s), older new events may be skipped", device.device_id, MAX_PAGES)
     return new_events
 
 
@@ -227,7 +227,7 @@ def sync_device(device, client):
         EventLog.objects.bulk_create(new_events, ignore_conflicts=True)
         device.baseline_done = True
         device.save(update_fields=["baseline_done"])
-        logger.info("Device %s: stored %s baseline events (not counted)", device.id, len(new_events))
+        logger.info("Device %s: stored %s baseline events (not counted)", device.device_id, len(new_events))
         return
 
     with transaction.atomic():
@@ -237,14 +237,14 @@ def sync_device(device, client):
         device.save(update_fields=["current_count", "count_date"])
     logger.info(
         "Device %s: %s new events, +%s counted, count %s/%s on %s",
-        device.id, len(new_events), increment, device.current_count, device.maximum_trigger, device.count_date,
+        device.device_id, len(new_events), increment, device.current_count, device.maximum_trigger, device.count_date,
     )
 
     if device.current_count >= device.maximum_trigger:
         dispatch_work_orders(device)
         # Reset even if every POST failed (failures are only logged).
         DeviceList.objects.filter(pk=device.pk).update(current_count=0)
-        logger.info("Device %s: Work Order dispatched, count reset to 0", device.id)
+        logger.info("Device %s: Work Order dispatched, count reset to 0", device.device_id)
 
 
 BACKFILL_PAGE_SIZE = 100
@@ -275,7 +275,7 @@ def backfill_events(client, device, start):
         if len(in_range) < len(events) or len(items) < BACKFILL_PAGE_SIZE:
             break
     else:
-        logger.warning("Device %s: backfill reached BACKFILL_MAX_PAGES (%s)", device.id, BACKFILL_MAX_PAGES)
+        logger.warning("Device %s: backfill reached BACKFILL_MAX_PAGES (%s)", device.device_id, BACKFILL_MAX_PAGES)
 
     relabeled = 0
     for event in EventLog.objects.filter(device=device, time__gte=start):
@@ -291,8 +291,8 @@ def sync_all():
     client = ZKClient()
     # Only People Counting devices read the ZK people-counting API; other modules need their own integration.
     # DEMO-* devices (seed_locations --demo, local dummies) are not real ZK sensors.
-    for device in DeviceList.objects.filter(type=DeviceList.TYPE_PEOPLE).exclude(id__startswith="DEMO-"):
+    for device in DeviceList.objects.filter(type=DeviceList.TYPE_PEOPLE).exclude(device_id__startswith="DEMO-"):
         try:
             sync_device(device, client)
         except ZKError as exc:
-            logger.error("Device %s: sync failed: %s", device.id, exc)
+            logger.error("Device %s: sync failed: %s", device.device_id, exc)
