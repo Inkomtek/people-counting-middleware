@@ -31,12 +31,12 @@ Dokumen ini menjelaskan cara mengirim data sensor toilet (Amonia, Liquid Soap, T
 | Field | Tipe | Wajib | Keterangan |
 | --- | --- | --- | --- |
 | `id` | String | Ya | ID unik data, **unik per device**. |
-| `inputDate` | DateTime (ISO 8601) | Ya | Waktu data dicatat. Tanpa zona waktu dibaca sebagai WIB; akhiran `Z` = UTC. |
+| `inputDate` | DateTime (ISO 8601) | Ya | Waktu data dicatat. Tanpa zona waktu dibaca sebagai WIB; akhiran `Z` = UTC. Maksimal 5 menit di masa depan. |
 | `deviceId` | String | Ya | ID device yang sudah didaftarkan oleh tim kami. |
 | `value` | Numeric | Tidak | Nilai bacaan sensor (% untuk sabun, tisu, tisu toilet, tempat sampah; ppm untuk amonia). |
 | `battery` | Numeric | Tidak | Sisa baterai device, 0 sampai 100 (%). |
-| `lastOnline` | DateTime (ISO 8601) | Tidak | Terakhir kali device online. |
-| `status` | String | Tidak | Kondisi sensor hasil pembacaan (mis. `Terisi`, `Hampir Habis`), ditampilkan apa adanya di dashboard. |
+| `lastOnline` | DateTime (ISO 8601) | Tidak | Terakhir kali device online. Maksimal 5 menit di masa depan. |
+| `status` | String | Tidak | Kondisi sensor hasil pembacaan (mis. `Terisi`, `Hampir Habis`), ditampilkan apa adanya di dashboard. Jika kosong, kondisi ditentukan server dari `value`. |
 
 ---
 
@@ -101,6 +101,7 @@ curl -X POST http://202.157.177.157:8080/api/v1/readings/ \
 - `id`, `inputDate` dan `deviceId` wajib diisi.
 - `deviceId` harus sudah terdaftar sebagai device sensor (amonia, sabun, tisu, tisu toilet atau tempat sampah).
 - `battery` harus angka 0 sampai 100; `value` harus angka.
+- `inputDate` dan `lastOnline` tidak boleh lebih dari 5 menit di masa depan (toleransi selisih jam device). Pastikan jam device sudah sinkron.
 - **Data ganda:** data dengan `id` yang sama untuk `deviceId` yang sama tidak disimpan ulang dan tidak dianggap error. Aman untuk mengirim ulang data yang sama, misalnya setelah koneksi terputus.
 - **Batch:** semua data harus valid. Jika satu data tidak valid, seluruh batch ditolak dan tidak ada yang disimpan; perbaiki data tersebut lalu kirim ulang batch-nya.
 

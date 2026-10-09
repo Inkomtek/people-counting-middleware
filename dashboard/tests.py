@@ -338,6 +338,27 @@ class DashboardTests(TestCase):
         visitors_column = [int(line.split(",")[2]) for line in export.content.decode().splitlines()[1:] if line]
         self.assertEqual(visitors_column, sorted(visitors_column, reverse=True))
 
+    def test_impossible_dates_and_times_in_the_url_do_not_crash(self):
+        # Well-formed but impossible values used to raise ValueError (500) on this public dashboard.
+        for url, params in (
+            ("/", {"start": "2026-02-30"}),
+            ("/", {"end": "2026-13-01"}),
+            ("/people-counting/", {"start": "2026-02-30"}),
+            ("/people-counting/detail/", {"start": "2026-02-31", "end": "2026-03-01"}),
+            ("/people-counting/detail/", {"tab": "events", "time_from": "25:99", "time_to": "24:61"}),
+            ("/people-counting/detail/events.csv", {"time_from": "25:99"}),
+        ):
+            self.assertEqual(self.client.get(url, params).status_code, 200, (url, params))
+
+    def test_custom_range_is_capped(self):
+        from dashboard.views import MAX_RANGE_DAYS
+
+        response = self.client.get("/people-counting/detail/", {"start": "1900-01-01", "end": "2026-10-09"})
+        self.assertEqual(response.status_code, 200)
+        start, end = response.context["start"], response.context["end"]
+        self.assertEqual((end - start).days + 1, MAX_RANGE_DAYS)
+        self.assertLessEqual(len(response.context["traffic"]["bars"]), MAX_RANGE_DAYS)
+
     # ---------- location hierarchy ----------
     def title(self, **params):
         location = self.client.get("/", params).context["location"]
@@ -434,7 +455,7 @@ class DashboardTests(TestCase):
                          ["pc-off"])
         cards = {c["device"].device_id: c for c in response.context["device_cards"]}
         self.assertEqual(cards[DEVICE_ID]["url"],
-                         f"/people-counting/?scope={self.scope.pk}&range=today#sensor-table")
+                         f"/people-counting/?scope={self.scope.pk}&range=today")
         demo = self.add_people_device("DEMO-PEOPLE-01", "Demo")
         demo_card = next(c for c in self.client.get("/").context["device_cards"] if c["device"].pk == demo.pk)
         self.assertIsNone(demo_card["url"])  # demo/dummy counters are not links

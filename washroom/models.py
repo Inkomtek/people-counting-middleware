@@ -117,9 +117,20 @@ class CustomerResponse(models.Model):
     time = models.DateTimeField(db_index=True)
     rating = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
     comment = models.TextField(blank=True)
+    # Optional sender's id for the press ("id" in the payload); unique per device, so a resent rating is
+    # skipped. Empty when the sender does not send one (then every POST is a new rating).
+    external_id = models.CharField(max_length=100, blank=True, default="")
     payload = models.JSONField(default=dict, blank=True)
     received_at = models.DateTimeField(auto_now_add=True)
     client = models.ForeignKey(ApiClient, on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["device", "external_id"], condition=~models.Q(external_id=""),
+                name="unique_response_external_id_per_device",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.rating} - {self.time}"

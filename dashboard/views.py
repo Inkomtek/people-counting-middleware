@@ -37,6 +37,9 @@ DETAIL_TABS = ("recap", "wo", "events")
 # Default date range per detail tab when none is given (the recap chart reads best over a week).
 DETAIL_DEFAULT_RANGE = {"recap": "7", "wo": "30", "events": "30"}
 LANGUAGE_COOKIE_AGE = 365 * 24 * 60 * 60
+# Longest custom date range: the dashboard is public, and a range of decades (one chart bar per day)
+# took tens of seconds to render.
+MAX_RANGE_DAYS = 731
 
 
 def localized(view):
@@ -63,17 +66,27 @@ def _base_context(lang, config=None):
     }
 
 
+def _parse(parser, value):
+    """parse_date / parse_time for URL input: None for a missing, malformed or impossible value
+    (e.g. 2026-02-30 or 25:99, which make Django's parsers raise ValueError) instead of a 500."""
+    try:
+        return parser(value or "")
+    except ValueError:
+        return None
+
+
 def _date_range(params, default_preset):
-    """Resolve ?range=today|7|30 or ?start=&end= (WIB dates, inclusive) to (start, end, preset)."""
+    """Resolve ?range=today|7|30 or ?start=&end= (WIB dates, inclusive) to (start, end, preset).
+    A custom range is limited to MAX_RANGE_DAYS, keeping the end date."""
     today = timezone.localdate()
     preset = params.get("range")
-    start, end = parse_date(params.get("start") or ""), parse_date(params.get("end") or "")
+    start, end = _parse(parse_date, params.get("start")), _parse(parse_date, params.get("end"))
     if preset not in PRESETS and not (start or end):
         preset = default_preset
     if preset in PRESETS:
         return today - timedelta(days=PRESETS[preset] - 1), today, preset
     end = min(end or today, today)
-    start = min(start or end, end)
+    start = max(min(start or end, end), end - timedelta(days=MAX_RANGE_DAYS - 1))
     return start, end, ""
 
 
@@ -308,12 +321,12 @@ DEMO_PREFIXES = ("DEMO-", "DUMMY-")
 
 
 def _people_card_url(device, ctx):
-    """A real people counter's card opens People Counting for its toilet (or the unassigned group) at the
-    sensor table; demo/dummy devices are not links."""
+    """A real people counter's card opens People Counting for its toilet (or the unassigned group), from the
+    top of the page; demo/dummy devices are not links."""
     if device.device_id.upper().startswith(DEMO_PREFIXES):
         return None
     where = f"scope={device.scope_id}" if device.scope_id else f"client={locations.UNASSIGNED}"
-    return f"{reverse('dashboard:people_counting')}?{where}&{ctx['range_query']}#sensor-table"
+    return f"{reverse('dashboard:people_counting')}?{where}&{ctx['range_query']}"
 
 
 def _active_filters(request, ctx, sensor, status, q):
@@ -428,7 +441,7 @@ def people_counting_detail(request, lang):
                                        anchor="table")
         ctx.update(wo_rows=[queries.work_order_row(log) for log in page], wo_status=status, wo_query=query)
     else:
-        time_from, time_to = parse_time(params.get("time_from") or ""), parse_time(params.get("time_to") or "")
+        time_from, time_to = _parse(parse_time, params.get("time_from")), _parse(parse_time, params.get("time_to"))
         event_type = params.get("event_type", "")
         sort, direction, ctx["ev_headers"] = _column_sort(request, queries.EVENT_SORTS, anchor="table")
         page, ctx["pager"] = _paginate(
@@ -477,8 +490,8 @@ def export(request, lang, kind, fmt):
         data = tablib.Dataset(headers=[t["time"], t["device_id"], t["event_id"], t["event_type"],
                                        t["recognition_target"], t["counted"]])
         sort, direction, _ = _column_sort(request, queries.EVENT_SORTS)
-        logs = queries.events(devices, start, end, parse_time(params.get("time_from") or ""),
-                              parse_time(params.get("time_to") or ""), params.get("event_type", ""), sort, direction)
+        logs = queries.events(devices, start, end, _parse(parse_time, params.get("time_from")),
+                              _parse(parse_time, params.get("time_to")), params.get("event_type", ""), sort, direction)
         for log in logs:
             data.append([_local(log.time), log.device.device_id, log.id, log.event_type,
                          log.recognition_target, t["yes"] if log.counted else t["no"]])

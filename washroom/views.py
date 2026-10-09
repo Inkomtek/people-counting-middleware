@@ -67,6 +67,15 @@ LOCATION_PARAMETERS = [
 ]
 
 
+def _parse_datetime(value):
+    """parse_datetime for a query parameter: None for a missing, malformed or impossible value
+    (e.g. 2026-02-30T00:00:00, which makes Django's parser raise ValueError) instead of a 500."""
+    try:
+        return parse_datetime(value or "")
+    except ValueError:
+        return None
+
+
 def _filter(queryset, params):
     """Filters shared by both list endpoints; location filters follow the dashboard's toilet fields."""
     device_id = params.get("device_id") or params.get("deviceId")
@@ -77,16 +86,12 @@ def _filter(queryset, params):
             queryset = queryset.filter(**{f"device__{field}": params[field]})
     if (params.get("scope") or "").isdigit():
         queryset = queryset.filter(device__scope_id=params["scope"])
-    if parse_datetime(params.get("time_from") or ""):
-        queryset = queryset.filter(time__gte=parse_datetime(params["time_from"]))
-    if parse_datetime(params.get("time_to") or ""):
-        queryset = queryset.filter(time__lte=parse_datetime(params["time_to"]))
+    time_from, time_to = _parse_datetime(params.get("time_from")), _parse_datetime(params.get("time_to"))
+    if time_from:
+        queryset = queryset.filter(time__gte=time_from)
+    if time_to:
+        queryset = queryset.filter(time__lte=time_to)
     return queryset
-
-
-def _created(serializer_class, objects, many):
-    data = serializer_class(objects, many=True).data
-    return Response({"status": "success", "data": data if many else data[0]}, status=status.HTTP_201_CREATED)
 
 
 class ReadingListCreateView(generics.ListAPIView):
@@ -115,7 +120,9 @@ class ReadingListCreateView(generics.ListAPIView):
             "Raw data format of the sensor team (Washroom Dashboard Raw Data Documentation v1.0). Send one "
             "reading as a JSON object, or up to 500 as a JSON list (all or nothing). `deviceId` must be "
             "registered in Admin (Device list); its type there (soap, toilet-paper, tissue, trash, ammonia) is "
-            "the sensor type. `value` and `status` are stored as sent. `id` is unique per device: a reading "
+            "the sensor type. `value` and `status` are stored as sent; without a `status` (or one that matches no "
+            "Status rule) the condition is derived from `value`. `inputDate` / `lastOnline` may be at most 5 "
+            "minutes in the future. `id` is unique per device: a reading "
             "already stored is skipped (counted in `duplicates`), so resending is safe. 201 when at least one "
             "reading is new, 200 when all were duplicates."
         ),
@@ -162,12 +169,16 @@ class CustomerResponseListCreateView(generics.ListAPIView):
         description=(
             "One rating press (1-5) as a JSON object, or up to 500 as a JSON list (all or nothing). The "
             "`device_id` must already exist in Admin `DeviceList` and must be a `satisfaction` device. Unknown or "
-            "mismatched IDs are rejected."
+            "mismatched IDs are rejected. The optional `id` is unique per device: a rating already stored is "
+            "skipped (counted in `duplicates`), so resending is safe. `time` may be at most 5 minutes in the "
+            "future. 201 when at least one rating is new, 200 when all were duplicates."
         ),
         request=CustomerResponseInSerializer(many=True),
         responses={
             201: inline_serializer("CustomerResponseCreated", {
                 "status": serializers.CharField(default="success"),
+                "created": serializers.IntegerField(),
+                "duplicates": serializers.IntegerField(),
                 "data": CustomerResponseOutSerializer(many=True),
             }),
             400: OpenApiResponse(ERROR_RESPONSE), 401: OpenApiResponse(ERROR_RESPONSE),
@@ -177,4 +188,10 @@ class CustomerResponseListCreateView(generics.ListAPIView):
         items, many, error = _validate_batch(request, CustomerResponseInSerializer)
         if error:
             return error
-        return _created(CustomerResponseOutSerializer, store_customer_responses(items, request.user), many)
+        stored, created = store_customer_responses(items, request.user)
+        data = CustomerResponseOutSerializer(stored, many=True).data
+        return Response(
+            {"status": "success", "created": created, "duplicates": len(stored) - created,
+             "data": data if many else data[0]},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )

@@ -185,6 +185,15 @@ class SyncDeviceTests(TestCase):
             self.assertNotIn("tok", str(log.response))
 
 
+class AdminDateFilterTests(TestCase):
+    def test_impossible_dates_in_admin_filters_do_not_crash(self):
+        from django.contrib.auth.models import User
+
+        self.client.force_login(User.objects.create_superuser("admin", "", "pw"))
+        self.assertEqual(self.client.get("/admin/core/dailyrecap/", {"date_from": "2026-02-30"}).status_code, 200)
+        self.assertEqual(self.client.get("/admin/core/eventlog/", {"time_from": "2026-02-30T10:00"}).status_code, 200)
+
+
 class DailyRecapAdminTests(TestCase):
     def test_recap_shows_daily_totals(self):
         from django.contrib.auth.models import User

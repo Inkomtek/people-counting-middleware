@@ -54,6 +54,12 @@ def store_readings(items, client):
             reading = seen.get(key) or SensorReading.objects.filter(device=device, external_id=item["id"]).first()
             if reading is None:
                 status = (item.get("status") or "").strip()
+                level = item.get("value")
+                # The sender's status is shown as sent. Without one (or with one that matches no Status rule)
+                # the server derives it from the value, so the card still gets a condition and a colour.
+                computed, computed_severity = evaluate_condition(device.type, level, rules)
+                condition = status or computed
+                severity = severity_for_status(device.type, status, rules) or computed_severity
                 battery = item.get("battery")
                 reading = SensorReading.objects.create(
                     device=device,
@@ -61,9 +67,9 @@ def store_readings(items, client):
                     time=item["inputDate"],
                     last_online=item.get("lastOnline"),
                     battery=round(battery) if battery is not None else None,
-                    level=item.get("value"),
-                    condition=status,
-                    severity=severity_for_status(device.type, status, rules),
+                    level=level,
+                    condition=condition,
+                    severity=severity,
                     payload=item["payload"],
                     client=client,
                 )
@@ -74,16 +80,31 @@ def store_readings(items, client):
 
 
 def store_customer_responses(items, client):
-    """Save validated rating dicts. Returns the created responses."""
+    """Save validated rating dicts. A rating with an `id` already stored for its device (or repeated in the
+    same batch) is skipped, so the sender can safely resend; without an `id` every item is new.
+    Returns (stored, created_count) like store_readings."""
+    stored, created_count, seen = [], 0, {}
     with transaction.atomic():
-        return [
-            CustomerResponse.objects.create(
-                device=_get_device(item["device_id"], SATISFACTION_TYPE),
-                time=item["time"],
-                rating=item["rating"],
-                comment=item.get("comment", ""),
-                payload=item["payload"],
-                client=client,
-            )
-            for item in items
-        ]
+        for item in items:
+            device = _get_device(item["device_id"], SATISFACTION_TYPE)
+            external_id = (item.get("id") or "").strip()
+            key = (device.pk, external_id)
+            response = None
+            if external_id:
+                response = seen.get(key) or CustomerResponse.objects.filter(
+                    device=device, external_id=external_id).first()
+            if response is None:
+                response = CustomerResponse.objects.create(
+                    device=device,
+                    external_id=external_id,
+                    time=item["time"],
+                    rating=item["rating"],
+                    comment=item.get("comment", ""),
+                    payload=item["payload"],
+                    client=client,
+                )
+                created_count += 1
+            if external_id:
+                seen[key] = response
+            stored.append(response)
+    return stored, created_count

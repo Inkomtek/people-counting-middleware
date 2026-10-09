@@ -1,3 +1,4 @@
+from datetime import timedelta
 from io import StringIO
 from unittest import mock
 
@@ -5,6 +6,7 @@ from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
+from django.utils import timezone
 
 from core.models import Area, Client, DeviceList, Region, Scope, Site
 
@@ -121,8 +123,10 @@ class ReadingTests(ApiTestCase):
         ])
         self.assertEqual(response.status_code, 201, response.json())
         data = response.json()["data"]
+        # value and status are kept as sent; an unknown status gets its colour from the value (150% soap ->
+        # "Terisi" rule -> normal), and nothing at all leaves both empty.
         self.assertEqual([(r["value"], r["status"], r["severity"]) for r in data],
-                         [(150, "Status Baru", ""), (None, "", "")])
+                         [(150, "Status Baru", "normal"), (None, "", "")])
 
     def test_severity_matches_status_case_insensitively(self):
         DeviceList.objects.create(device_id="B", type="trash")
@@ -207,6 +211,75 @@ class ReadingTests(ApiTestCase):
     def test_non_object_body_rejected(self):
         self.assertEqual(self.post(READINGS_URL, [1, 2]).status_code, 400)
         self.assertEqual(self.post(READINGS_URL, []).status_code, 400)
+
+
+class ListFilterTests(ApiTestCase):
+    def test_impossible_time_filter_is_ignored_not_a_500(self):
+        for params in ({"time_from": "2026-02-30T00:00:00"}, {"time_to": "2026-13-01T25:00:00"}):
+            self.assertEqual(self.get(READINGS_URL, params).status_code, 200, params)
+            self.assertEqual(self.get(RESPONSES_URL, params).status_code, 200, params)
+
+
+class AuditFixTests(ApiTestCase):
+    """Bugs 5, 7 and 8 from the 2026-10-09 audit."""
+
+    def setUp(self):
+        super().setUp()
+        DeviceList.objects.create(device_id="SOAP1", type="soap", **TOILET)
+        DeviceList.objects.create(device_id="FB1", type="satisfaction", **TOILET)
+
+    def reading(self, **extra):
+        return {"id": extra.pop("id", "r1"), "inputDate": "2026-10-09T10:00:00+07:00", "deviceId": "SOAP1", **extra}
+
+    # Bug 5: without a status, the condition comes from the value.
+    def test_condition_is_derived_from_value_without_status(self):
+        data = self.post(READINGS_URL, self.reading(value=0)).json()["data"]
+        self.assertEqual((data["status"], data["severity"]), ("Habis", "critical"))
+
+    def test_sender_status_is_kept_as_sent(self):
+        data = self.post(READINGS_URL, self.reading(value=0, status="Terisi")).json()["data"]
+        self.assertEqual((data["status"], data["severity"]), ("Terisi", "normal"))
+
+    def test_unknown_status_is_kept_and_coloured_from_value(self):
+        data = self.post(READINGS_URL, self.reading(value=0, status="Rusak")).json()["data"]
+        self.assertEqual((data["status"], data["severity"]), ("Rusak", "critical"))
+
+    def test_no_status_and_no_value_stays_empty(self):
+        data = self.post(READINGS_URL, self.reading()).json()["data"]
+        self.assertEqual((data["status"], data["severity"]), ("", ""))
+
+    # Bug 7: times in the future.
+    def test_far_future_times_are_rejected(self):
+        future = (timezone.now() + timedelta(hours=1)).isoformat()
+        for field in ("inputDate", "lastOnline"):
+            response = self.post(READINGS_URL, self.reading(**{field: future}))
+            self.assertEqual(response.status_code, 400, field)
+            self.assertIn(field, response.json()["errors"][0]["errors"])
+        response = self.post(RESPONSES_URL, {"device_id": "FB1", "rating": 5, "time": future})
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(SensorReading.objects.exists() or CustomerResponse.objects.exists())
+
+    def test_small_clock_drift_is_accepted(self):
+        soon = (timezone.now() + timedelta(minutes=2)).isoformat()
+        self.assertEqual(self.post(READINGS_URL, self.reading(inputDate=soon)).status_code, 201)
+        self.assertEqual(self.post(RESPONSES_URL, {"device_id": "FB1", "rating": 4, "time": soon}).status_code, 201)
+
+    # Bug 8: resent ratings.
+    def test_rating_with_same_id_is_stored_once(self):
+        first = self.post(RESPONSES_URL, {"id": "p-1", "device_id": "FB1", "rating": 5})
+        self.assertEqual((first.status_code, first.json()["created"], first.json()["data"]["id"]), (201, 1, "p-1"))
+        again = self.post(RESPONSES_URL, [{"id": "p-1", "device_id": "FB1", "rating": 5},
+                                          {"id": "p-2", "device_id": "FB1", "rating": 3},
+                                          {"id": "p-2", "device_id": "FB1", "rating": 3}])
+        self.assertEqual((again.status_code, again.json()["created"], again.json()["duplicates"]), (201, 1, 2))
+        only_dupes = self.post(RESPONSES_URL, {"id": "p-1", "device_id": "FB1", "rating": 5})
+        self.assertEqual((only_dupes.status_code, only_dupes.json()["created"]), (200, 0))
+        self.assertEqual(CustomerResponse.objects.count(), 2)
+
+    def test_ratings_without_id_are_all_new(self):
+        body = self.post(RESPONSES_URL, [{"device_id": "FB1", "rating": 5}] * 2).json()
+        self.assertEqual((body["created"], body["duplicates"]), (2, 0))
+        self.assertEqual(CustomerResponse.objects.count(), 2)
 
 
 class CustomerResponseTests(ApiTestCase):

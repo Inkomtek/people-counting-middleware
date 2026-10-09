@@ -17,6 +17,14 @@ from .resources import EventLogResource, NotificationLogResource, SensorLogResou
 RECAP_DAYS = 30
 
 
+def _parse(parser, value):
+    """parse_date / parse_datetime for a filter value: None when it is impossible (e.g. 2026-02-30)."""
+    try:
+        return parser(value or "")
+    except ValueError:
+        return None
+
+
 class TimeRangeFilter(admin.ListFilter):
     """Sidebar filter with "from" / "to" datetime inputs on the `time` field (Asia/Jakarta)."""
 
@@ -33,7 +41,7 @@ class TimeRangeFilter(admin.ListFilter):
             # Django 5+ passes list values; keep the last one.
             if isinstance(value, list):
                 value = value[-1]
-            parsed = parse_datetime(value) if value else None
+            parsed = _parse(parse_datetime, value)
             if parsed is not None:
                 self.values[name] = (value, timezone.make_aware(parsed) if timezone.is_naive(parsed) else parsed)
 
@@ -222,8 +230,8 @@ class DailyRecapAdmin(ReadOnlyAdmin):
 
     def changelist_view(self, request, extra_context=None):
         device_id = request.GET.get("device") or ""
-        date_from = parse_date(request.GET.get("date_from") or "")
-        date_to = parse_date(request.GET.get("date_to") or "")
+        date_from = _parse(parse_date, request.GET.get("date_from"))
+        date_to = _parse(parse_date, request.GET.get("date_to"))
         filtered = bool(date_from or date_to)
 
         export_format = request.GET.get("export")

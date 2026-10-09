@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -6,6 +8,17 @@ from core.models import DeviceList
 from .models import READING_TYPES, SATISFACTION_TYPE, CustomerResponse, SensorReading
 
 TIME_HELP = "ISO 8601. Without offset it is read as WIB. Default: time received."
+# Allowed clock drift for times sent by devices; anything later is rejected, because the dashboard shows
+# each device's newest data and a far-future time would freeze its card on that value.
+FUTURE_TOLERANCE = timedelta(minutes=5)
+
+
+def not_in_future(value):
+    if value is not None and value > timezone.now() + FUTURE_TOLERANCE:
+        raise serializers.ValidationError(
+            f"Waktu tidak boleh lebih dari {int(FUTURE_TOLERANCE.total_seconds() // 60)} menit di masa depan."
+        )
+    return value
 
 
 def registered_device(device_id, allowed_types, field="device_id"):
@@ -44,16 +57,29 @@ class ReadingInSerializer(serializers.Serializer):
     lastOnline = serializers.DateTimeField(required=False, allow_null=True, help_text=TIME_HELP.split(".")[0])
     status = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
 
+    def validate_inputDate(self, value):
+        return not_in_future(value)
+
+    def validate_lastOnline(self, value):
+        return not_in_future(value)
+
     def validate(self, attrs):
         attrs["device"] = registered_device(attrs["deviceId"], READING_TYPES, field="deviceId")
         return attrs
 
 
 class CustomerResponseInSerializer(serializers.Serializer):
+    id = serializers.CharField(
+        max_length=100, required=False, allow_blank=True,
+        help_text="Optional sender's id for this press, unique per device: a rating already stored is skipped.",
+    )
     device_id = serializers.CharField(max_length=100)
     time = serializers.DateTimeField(required=False, help_text=TIME_HELP)
     rating = serializers.IntegerField(min_value=1, max_value=5)
     comment = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_time(self, value):
+        return not_in_future(value)
 
     def validate(self, attrs):
         check_device_type(attrs["device_id"], SATISFACTION_TYPE)
@@ -98,8 +124,9 @@ class ReadingOutSerializer(DeviceLocationMixin, serializers.ModelSerializer):
 
 class CustomerResponseOutSerializer(DeviceLocationMixin, serializers.ModelSerializer):
     response_id = serializers.IntegerField(source="id")
+    id = serializers.CharField(source="external_id")
     device_id = serializers.CharField(source="device.device_id")
 
     class Meta:
         model = CustomerResponse
-        fields = ("response_id", "device_id", "building", "floor", "gender", "location", "time", "rating", "comment")
+        fields = ("response_id", "id", "device_id", "building", "floor", "gender", "location", "time", "rating", "comment")

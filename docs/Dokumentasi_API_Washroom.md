@@ -125,12 +125,12 @@ Digunakan tim sensor untuk mengirim data sensor (Amonia, Liquid Soap, Tissue Pap
 | Field | Tipe | Wajib | Keterangan |
 | --- | --- | --- | --- |
 | `id` | String | Ya | ID unik data, **unik per device**. Disimpan di server. |
-| `inputDate` | DateTime (ISO 8601) | Ya | Waktu data dicatat. Tanpa offset dibaca sebagai WIB; `Z` = UTC. |
+| `inputDate` | DateTime (ISO 8601) | Ya | Waktu data dicatat. Tanpa offset dibaca sebagai WIB; `Z` = UTC. Maksimal 5 menit di masa depan. |
 | `deviceId` | String | Ya | ID device, harus terdaftar di Admin `DeviceList`. Tipe device di Admin menentukan jenis sensor. |
 | `value` | Numeric | Tidak | Nilai bacaan sensor, disimpan apa adanya (% untuk soap/tissue/toilet paper/trash, ppm untuk amonia). |
 | `battery` | Numeric | Tidak | Sisa baterai 0-100 (%). |
-| `lastOnline` | DateTime (ISO 8601) | Tidak | Terakhir kali device online. |
-| `status` | String | Tidak | Kondisi menurut tim sensor (mis. `Terisi`), disimpan dan ditampilkan apa adanya di dashboard. |
+| `lastOnline` | DateTime (ISO 8601) | Tidak | Terakhir kali device online. Maksimal 5 menit di masa depan. |
+| `status` | String | Tidak | Kondisi menurut tim sensor (mis. `Terisi`), disimpan dan ditampilkan apa adanya di dashboard. Jika kosong, server menentukan kondisi dari `value` (lihat bagian Status dan severity). |
 
 ### Payload satu object
 
@@ -168,6 +168,7 @@ Digunakan tim sensor untuk mengirim data sensor (Amonia, Liquid Soap, Tissue Pap
 - `id`, `inputDate`, `deviceId` wajib
 - `deviceId` harus sudah ada di Admin `DeviceList` dengan tipe `soap`, `toilet-paper`, `tissue`, `trash` atau `ammonia`; device lain (people counter, satisfaction) ditolak
 - `battery` 0-100 (opsional); `value` dan `status` tidak dibatasi
+- `inputDate` dan `lastOnline` tidak boleh lebih dari 5 menit di masa depan (toleransi selisih jam device)
 - **Data ganda:** jika `id` yang sama untuk `deviceId` yang sama sudah tersimpan, data tersebut dilewati (tidak disimpan ulang dan tidak error), jadi aman untuk mengirim ulang
 - Batch: semua item harus valid, jika satu item gagal maka seluruh batch ditolak
 
@@ -275,6 +276,7 @@ Digunakan untuk mengirim rating pelanggan (skala 1-5) dari tombol feedback.
 
 ```json
 {
+  "id": "press-0001",
   "device_id": "POSTMAN-FEEDBACK-01",
   "rating": 5,
   "comment": "Toilet bersih"
@@ -282,6 +284,7 @@ Digunakan untuk mengirim rating pelanggan (skala 1-5) dari tombol feedback.
 ```
 
 > `device_id` untuk feedback juga harus sudah ada di Admin dan tipe `satisfaction`.
+> `id` opsional, tetapi disarankan: rating dengan `id` yang sama untuk `device_id` yang sama hanya disimpan sekali, jadi aman dikirim ulang.
 
 ### Payload list
 
@@ -306,6 +309,8 @@ Digunakan untuk mengirim rating pelanggan (skala 1-5) dari tombol feedback.
 - `device_id` harus sudah ada di Admin `DeviceList` dan tipe `satisfaction`
 - `rating` wajib integer 1 sampai 5
 - `comment` opsional string kosong
+- `id` opsional, unik per `device_id`; rating yang `id`-nya sudah tersimpan dilewati (dihitung di `duplicates`)
+- `time` opsional (default waktu server menerima), tidak boleh lebih dari 5 menit di masa depan
 - Batch: seluruh item harus valid, bila salah satu gagal semua batch ditolak
 
 ### Contoh response sukses
@@ -313,8 +318,11 @@ Digunakan untuk mengirim rating pelanggan (skala 1-5) dari tombol feedback.
 ```json
 {
   "status": "success",
+  "created": 1,
+  "duplicates": 0,
   "data": {
     "response_id": 4,
+    "id": "press-0001",
     "device_id": "POSTMAN-FEEDBACK-01",
     "building": "GRAHA ISS BINTARO",
     "floor": "2",
@@ -332,7 +340,9 @@ Digunakan untuk mengirim rating pelanggan (skala 1-5) dari tombol feedback.
 
 `status` yang ditampilkan di dashboard adalah `status` yang dikirim tim sensor, apa adanya.
 
-`severity` (`normal` / `warning` / `critical`) diisi server bila `status` sama dengan nama kondisi di Admin **Status rules** untuk jenis sensor tersebut (tidak membedakan huruf besar/kecil), misalnya `Terisi` → `normal`, `Habis` → `critical`. Jika tidak ada yang cocok, `severity` kosong.
+`severity` (`normal` / `warning` / `critical`) diisi server bila `status` sama dengan nama kondisi di Admin **Status rules** untuk jenis sensor tersebut (tidak membedakan huruf besar/kecil), misalnya `Terisi` → `normal`, `Habis` → `critical`. Jika tidak ada yang cocok, `severity` ditentukan dari `value` memakai rentang di Status rules.
+
+Jika `status` tidak dikirim (atau kosong), server menentukan `status` dan `severity` dari `value` memakai Status rules, misalnya sabun `value: 0` → `Habis` (`critical`). Jika `status` dan `value` sama-sama kosong, keduanya tetap kosong.
 
 ---
 
